@@ -4,7 +4,11 @@ from app.rag.retriever import RAGRetriever
 
 # グローバルで RAGRetriever を初期化
 # ※インデックスは backend 起動時に既に構築済み
-rag = RAGRetriever()
+rag = None
+try:
+    rag = RAGRetriever()
+except Exception as e:
+    print(f"警告: rag_tool.py での RAGRetriever の初期化に失敗しました: {e}")
 
 def run_rag(query: str) -> List[Dict]:
     """
@@ -12,4 +16,11 @@ def run_rag(query: str) -> List[Dict]:
     - query: ユーザーの質問
     - return: 検索結果のリスト
     """
-    return rag.search(query)
+    if rag is None:
+        print("警告: RAGRetriever が初期化されていません")
+        return []
+    try:
+        return rag.search(query)
+    except Exception as e:
+        print(f"警告: RAG検索中にエラーが発生しました: {e}")
+        return []

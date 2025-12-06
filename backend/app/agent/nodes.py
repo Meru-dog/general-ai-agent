@@ -14,7 +14,13 @@ llm = ChatOpenAI(
     api_key=config.OPENAI_API_KEY
 )
 
-rag_retriever = RAGRetriever()
+# RAGRetriever の初期化（エラーハンドリング付き）
+rag_retriever = None
+try:
+    rag_retriever = RAGRetriever()
+except Exception as e:
+    print(f"警告: RAGRetriever の初期化に失敗しました: {e}")
+    print("RAG機能は使用できませんが、アプリは起動します。")
 
 
 def analyze_intent(state: AgentState) -> AgentState:
@@ -90,22 +96,37 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
     # 文書依存 → RAG 実行
     query = state.input
     
-    # インデックスの状態を確認
-    index_count = rag_retriever.collection.count()
-    if index_count == 0:
-        msg = f"RAG実行: インデックスが空です（{index_count}件）。インデックスが構築されていない可能性があります。"
+    # RAGRetriever が初期化されていない場合
+    if rag_retriever is None:
+        msg = "RAG実行: RAGRetriever が初期化されていません。環境変数やインデックスの設定を確認してください。"
         print(f"警告: {msg}")
         state.rag_result = []
     else:
-        results = rag_retriever.search(query)
-        titles = [r.get("document_title", "（タイトル不明）") for r in results]
-        if results:
-            # 例として最大3件までタイトルを表示
-            sample_titles = "、".join(titles[:3])
-            msg = f"RAG実行: {len(results)}件ヒット（例: {sample_titles}）"
-        else:
-            msg = f"RAG実行: 0件ヒット（インデックスには{index_count}件のチャンクがありますが、関連する文書が見つかりませんでした）"
-        state.rag_result = results
+        try:
+            # インデックスの状態を確認
+            index_count = rag_retriever.collection.count()
+            if index_count == 0:
+                msg = f"RAG実行: インデックスが空です（{index_count}件）。インデックスが構築されていない可能性があります。"
+                print(f"警告: {msg}")
+                state.rag_result = []
+            else:
+                results = rag_retriever.search(query)
+                titles = [r.get("document_title", "（タイトル不明）") for r in results]
+                if results:
+                    # 例として最大3件までタイトルを表示
+                    sample_titles = "、".join(titles[:3])
+                    msg = f"RAG実行: {len(results)}件ヒット（例: {sample_titles}）"
+                else:
+                    msg = f"RAG実行: 0件ヒット（インデックスには{index_count}件のチャンクがありますが、関連する文書が見つかりませんでした）"
+                state.rag_result = results
+        except Exception as e:
+            # RAG実行中にエラーが発生した場合
+            error_msg = f"RAG実行中にエラーが発生しました: {str(e)}"
+            print(f"警告: {error_msg}")
+            import traceback
+            print(traceback.format_exc())
+            msg = f"RAG実行: エラーが発生しました（{error_msg}）"
+            state.rag_result = []
 
     state.steps.append(
         StepLog(
