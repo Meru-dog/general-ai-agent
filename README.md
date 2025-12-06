@@ -74,26 +74,24 @@ general-ai-agent/
 │  │  │  └─ retriever.py       # Chroma から類似文書を取得
 │  │  ├─ documents/        # RAG の対象となるテキスト文書
 │  │  │  ├─ NDA.txt
-│  │  │  ├─ BusinessAgencyAgreement.txt
-│  │  │  └─ ...
+│  │  │  └─ BusinessAgencyAgreement.txt
+│  │  │  
 │  │  └─ chroma_db/        # Chroma の永続化ディレクトリ（自動生成）
 │  ├─ .env                 # OPENAI_API_KEY など（Git管理外）
-│  ├─ requirements.txt     # Python 依存パッケージ
-│  └─ ...
+│  └─ requirements.txt     # Python 依存パッケージ
+│  
 │
 └─ frontend/
    ├─ index.html
    ├─ package.json
    ├─ vite.config.js
-   ├─ src/
-   │  ├─ main.jsx          # React エントリポイント
-   │  ├─ App.jsx           # 画面本体（入力 / 回答 / 実行ログ）
-   │  ├─ App.css
-   │  └─ index.css
-   └─ ...
+   └─ src/
+      ├─ main.jsx          # React エントリポイント
+      ├─ App.jsx           # 画面本体（入力 / 回答 / 実行ログ）
+      ├─ App.css
+      └─ index.css
+   
 ```
-
-※ 実際の構成に合わせて適宜修正すること。
 
 ---
 
@@ -124,7 +122,6 @@ pip install -r requirements.txt
 OPENAI_API_KEY=sk-xxxxx（自分のキー）
 ```
 
-※ `.env` は Git 管理に含めない（.gitignore 済み前提）。
 
 ### 5.3 文書の配置
 
@@ -133,11 +130,9 @@ OPENAI_API_KEY=sk-xxxxx（自分のキー）
 ```text
 backend/app/documents/
   ├─ NDA.txt
-  ├─ BusinessAgencyAgreement.txt
-  └─ ...
+  └─  BusinessAgencyAgreement.txt
 ```
 
-※ 初期はサンプルの NDA / 業務委託契約書などでOK。
 
 ### 5.4 ベクトルインデックスの構築
 
@@ -266,7 +261,84 @@ const API_URL = "http://localhost:8000/api/agent/ask";
 
 ---
 
-## 9. 今後の拡張アイデア
+## 9. デプロイ手順（Render + Vercel）
+
+### 9.1 バックエンド（Render）のデプロイ
+
+1. **RenderでWeb Serviceを作成**
+   - GitHubリポジトリを接続
+   - サービス名: `general-ai-agent`（任意）
+   - 環境: `Python 3`
+   - Root Directory: `backend`
+
+2. **Build Command**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Start Command**
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   ```
+
+4. **環境変数の設定**
+   Renderのダッシュボードで以下を設定：
+   - `OPENAI_API_KEY`: あなたのOpenAI APIキー
+   - `BUILD_INDEX_ON_STARTUP`: `false`（デフォルト。起動時のインデックス構築をスキップ）
+
+5. **インデックスの事前構築（オプション）**
+   デプロイ後、Renderのシェルから実行：
+   ```bash
+   python -m app.rag.build_index
+   ```
+   または、初回デプロイ時に`BUILD_INDEX_ON_STARTUP=true`に設定して起動後、`false`に戻す。
+
+6. **注意事項**
+   - `documents/`ディレクトリがGitHubに含まれていることを確認
+   - `chroma_db/`ディレクトリは`.gitignore`に含まれているため、デプロイ後にインデックスを構築する必要があります
+
+### 9.2 フロントエンド（Vercel）のデプロイ
+
+1. **Vercelでプロジェクトを作成**
+   - GitHubリポジトリを接続
+   - Root Directory: `frontend`
+   - Framework Preset: `Vite`
+
+2. **環境変数の設定（通常は不要）**
+   - フロントエンドは静的ファイルなので環境変数は不要
+
+3. **API URLの更新**
+   `frontend/src/App.jsx`の`API_URL`をRenderのURLに変更：
+   ```jsx
+   const API_URL = "https://your-app.onrender.com/api/agent/ask";
+   ```
+
+4. **ビルド設定**
+   - Build Command: `npm run build`（自動検出される）
+   - Output Directory: `dist`（自動検出される）
+
+### 9.3 トラブルシューティング
+
+**問題: サーバーエラー500が発生する**
+
+- 環境変数`OPENAI_API_KEY`が正しく設定されているか確認
+- Renderのログを確認してエラー内容を確認
+- `documents/`ディレクトリがデプロイされているか確認
+- インデックスが構築されているか確認（Renderのシェルから`python -m app.rag.build_index`を実行）
+
+**問題: 起動がタイムアウトする**
+
+- `BUILD_INDEX_ON_STARTUP=false`に設定して、起動時のインデックス構築をスキップ
+- デプロイ後に手動でインデックスを構築
+
+**問題: 文書が見つからない**
+
+- `documents/`ディレクトリがGitHubリポジトリに含まれているか確認
+- `.gitignore`で除外されていないか確認
+
+---
+
+## 10. 今後の拡張アイデア
 
 * 計算ツールや日付計算ツールを追加し、
   RAG以外のツールも切り替えながら使えるようにする
@@ -277,7 +349,7 @@ const API_URL = "http://localhost:8000/api/agent/ask";
 
 ---
 
-## 10. メモ
+## 11. メモ
 
 * このリポジトリは「**自律的にタスクを実行するエージェント**」の
   最小構成サンプルとして位置づける。

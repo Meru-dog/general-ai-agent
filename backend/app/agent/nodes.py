@@ -132,8 +132,14 @@ def generate_answer(state: AgentState) -> AgentState:
 
 以上を踏まえて簡潔に回答してください。
 """
-    res = llm.invoke(prompt)
-    answer = res.content.strip()
+    try:
+        res = llm.invoke(prompt)
+        answer = res.content.strip()
+    except Exception as e:
+        # LLM呼び出しが失敗した場合のエラーハンドリング
+        error_msg = f"LLM呼び出しに失敗しました: {str(e)}"
+        print(f"Error in generate_answer: {error_msg}")
+        answer = f"申し訳ございません。回答の生成中にエラーが発生しました: {error_msg}"
 
     state.output = answer
 

@@ -35,17 +35,30 @@ def build_index() -> None:
     documents/ から文書を読み込み、
     チャンク化 → 埋め込み計算 → Chroma に登録する。
     """
+    # 環境変数のチェック
+    if not config.OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY が設定されていません。環境変数を確認してください。")
+    
     # すべての文書を読み込む
-    docs = load_documents()
+    try:
+        docs = load_documents()
+    except RuntimeError as e:
+        raise RuntimeError(f"文書の読み込みに失敗しました: {e}")
 
     # 永続化モードの Chroma クライアントを作成
-    client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
+    try:
+        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
+    except Exception as e:
+        raise RuntimeError(f"ChromaDB クライアントの作成に失敗しました: {e}")
 
     # OpenAI の埋め込み関数を作成
-    openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-        api_key=config.OPENAI_API_KEY,
-        model_name=config.EMBEDDING_MODEL,
-    )
+    try:
+        openai_ef = embedding_functions.OpenAIEmbeddingFunction(
+            api_key=config.OPENAI_API_KEY,
+            model_name=config.EMBEDDING_MODEL,
+        )
+    except Exception as e:
+        raise RuntimeError(f"埋め込み関数の作成に失敗しました: {e}")
 
     # ★ ここで「既存コレクションを削除してから」作り直す
     collection_name = config.CHROMA_COLLECTION

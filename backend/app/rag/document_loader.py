@@ -25,7 +25,10 @@ def load_documents() -> List[Document]:
 
     # ディレクトリ自体が存在しない場合はエラー
     if not doc_dir.exists():
-        raise RuntimeError(f"DOCUMENTS_DIR が存在しません: {doc_dir}")
+        raise RuntimeError(
+            f"DOCUMENTS_DIR が存在しません: {doc_dir}\n"
+            "デプロイ環境では documents/ ディレクトリが含まれていることを確認してください。"
+        )
 
     # documents/ 配下のファイルを1つずつ見る
     for path in doc_dir.iterdir():

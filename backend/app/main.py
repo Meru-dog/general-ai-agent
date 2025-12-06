@@ -22,12 +22,24 @@ app.add_middleware(
 class AgentRequest(BaseModel):
     input: str
 
-# ★ 起動時にインデックスを構築
+# ★ 起動時にインデックスを構築（環境変数で制御可能）
 @app.on_event("startup")
 def startup_event():
-    print("アプリケーション起動: インデックスを構築します...")
-    build_index()
-    print("インデックス構築完了。")
+    import os
+    # 環境変数 BUILD_INDEX_ON_STARTUP が "true" の場合のみインデックスを構築
+    # デプロイ環境では通常 False に設定（事前にインデックスを構築済み）
+    should_build = os.getenv("BUILD_INDEX_ON_STARTUP", "false").lower() == "true"
+    
+    if should_build:
+        try:
+            print("アプリケーション起動: インデックスを構築します...")
+            build_index()
+            print("インデックス構築完了。")
+        except Exception as e:
+            # インデックス構築が失敗してもアプリは起動できるようにする
+            print(f"警告: インデックス構築に失敗しました（アプリは起動します）: {e}")
+    else:
+        print("アプリケーション起動: インデックス構築をスキップしました（BUILD_INDEX_ON_STARTUP=false）")
 
 
 @app.post("/api/agent/ask")
@@ -65,8 +77,14 @@ async def ask_agent(req: AgentRequest):
         )
 
     except Exception as e:
-        print("Error in /api/agent/ask:", e)
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in /api/agent/ask: {e}")
+        print(f"Traceback: {error_trace}")
         return JSONResponse(
-            content={"error": str(e)},
+            content={
+                "error": str(e),
+                "message": "エージェントの実行中にエラーが発生しました。サーバーログを確認してください。"
+            },
             status_code=500,
         )

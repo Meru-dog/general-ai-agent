@@ -12,7 +12,16 @@ load_dotenv()
 # OpenAI API
 # =========================
 # APIキー（環境変数から取得）
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY") or ""
+
+# 環境変数が設定されていない場合の警告（デプロイ環境では必須）
+if not OPENAI_API_KEY:
+    import warnings
+    warnings.warn(
+        "OPENAI_API_KEY が設定されていません。"
+        "デプロイ環境では環境変数として設定してください。",
+        UserWarning
+    )
 
 # LLMモデル（LangGraphの推論用モデル）
 LLM_MODEL: str = "gpt-4.1-mini"  # or "gpt-4o-mini"
