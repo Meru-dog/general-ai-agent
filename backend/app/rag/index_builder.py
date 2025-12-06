@@ -30,7 +30,6 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> List[str
 
     return chunks
 
-
 def build_index() -> None:
     """
     documents/ から文書を読み込み、
@@ -48,41 +47,44 @@ def build_index() -> None:
         model_name=config.EMBEDDING_MODEL,
     )
 
-    # コレクション（テーブルのようなもの）を取得 or 作成
+    # ★ ここで「既存コレクションを削除してから」作り直す
+    collection_name = config.CHROMA_COLLECTION
+
+    try:
+        client.delete_collection(name=collection_name)
+        print(f"既存コレクション '{collection_name}' を削除しました。")
+    except Exception as e:
+        # 初回など、そもそも存在しない場合はエラーになるので無視してOK
+        print(f"既存コレクション削除時にエラー（無視して続行）: {e}")
+
+    # 新しくコレクションを作り直す
     collection = client.get_or_create_collection(
-        name=config.CHROMA_COLLECTION,
+        name=collection_name,
         embedding_function=openai_ef,
     )
 
-    # すでにデータが入っている場合は、一旦全削除して作り直す方針
-    if collection.count() > 0:
-        collection.delete(where={})  # where={} は「全件削除」の意味
+    # ↓ ここから下（ids / documents / metadatas 作って add する処理）は今のままでOK
+    ids: List[str] = []
+    documents: List[str] = []
+    metadatas: List[dict] = []
 
-    ids: List[str] = []        # 各チャンクのID
-    documents: List[str] = []  # 各チャンクのテキスト本体
-    metadatas: List[dict] = [] # 文書IDやタイトルなどのメタ情報
-
-    # 各文書についてチャンク化し、Chroma に登録するための配列を作る
     for doc in docs:
         chunks = chunk_text(doc.content)
         for idx, chunk in enumerate(chunks):
-            # チャンクごとに一意なIDを作る（docID + "_chunk_" + インデックス）
             chunk_id = f"{doc.id}_chunk_{idx}"
             ids.append(chunk_id)
             documents.append(chunk)
             metadatas.append(
                 {
-                    "document_id": doc.id,   # どの文書に属するチャンクか
+                    "document_id": doc.id,
                     "document_title": doc.title,
-                    "chunk_index": idx,      # 文書内の何番目のチャンクか
+                    "chunk_index": idx,
                 }
             )
 
-    # 1つもチャンクがないのはさすがにおかしいのでエラー
     if not ids:
         raise RuntimeError("チャンクが1つも生成されませんでした。")
 
-    # Chroma に一括で追加
     collection.add(
         ids=ids,
         documents=documents,
