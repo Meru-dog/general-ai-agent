@@ -1,82 +1,70 @@
 # backend/app/rag/index_builder.py
-from typing import List                # 型ヒント用
-import chromadb                        # ベクトルストア Chroma のライブラリ
-from chromadb.utils import embedding_functions  # 埋め込み関数を使うため
+from typing import List
+import chromadb
+from chromadb.utils import embedding_functions
 
-from app import config                                # 設定
-from app.rag.document_loader import load_documents, Document  # 文書読み込み
+from app import config
+from app.rag.document_loader import load_documents, Document
 
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> List[str]:
     """
-    長いテキストを「チャンク」に分割する。
-    chunk_size: 1チャンクの長さ（文字数）
-    overlap: チャンク同士をどれくらい重ねるか（コンテキスト維持のため）
+    長いテキストをチャンクに分割する。
     """
     chunks: List[str] = []
     start = 0
     length = len(text)
 
-    # start を動かしながらテキストをスライスしていく
     while start < length:
-        end = min(start + chunk_size, length)  # テキストの末尾を超えないようにする
-        chunk = text[start:end]                # start〜end の範囲を1チャンクとして取り出す
+        end = min(start + chunk_size, length)
+        chunk = text[start:end]
         chunks.append(chunk)
         if end == length:
-            # 最後まで到達したらループ終了
             break
-        # 次のチャンクの開始位置を、少し戻して設定（オーバーラップ分）
         start = end - overlap
 
     return chunks
+
 
 def build_index() -> None:
     """
     documents/ から文書を読み込み、
     チャンク化 → 埋め込み計算 → Chroma に登録する。
     """
-    # 環境変数のチェック
-    if not config.OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY が設定されていません。環境変数を確認してください。")
-    
-    # すべての文書を読み込む
-    try:
-        docs = load_documents()
-    except RuntimeError as e:
-        raise RuntimeError(f"文書の読み込みに失敗しました: {e}")
+    # 1) 文書読み込み
+    docs = load_documents()
 
-    # 永続化モードの Chroma クライアントを作成
-    try:
-        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-    except Exception as e:
-        raise RuntimeError(f"ChromaDB クライアントの作成に失敗しました: {e}")
+    # 2) Chroma クライアント作成
+    client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
 
-    # OpenAI の埋め込み関数を作成
-    try:
-        openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=config.OPENAI_API_KEY,
-            model_name=config.EMBEDDING_MODEL,
-        )
-    except Exception as e:
-        raise RuntimeError(f"埋め込み関数の作成に失敗しました: {e}")
+    # 3) 埋め込み関数
+    openai_ef = embedding_functions.OpenAIEmbeddingFunction(
+        api_key=config.OPENAI_API_KEY,
+        model_name=config.EMBEDDING_MODEL,
+    )
 
-    # ★ ここで「既存コレクションを削除してから」作り直す
     collection_name = config.CHROMA_COLLECTION
 
-    try:
-        client.delete_collection(name=collection_name)
-        print(f"既存コレクション '{collection_name}' を削除しました。")
-    except Exception as e:
-        # 初回など、そもそも存在しない場合はエラーになるので無視してOK
-        print(f"既存コレクション削除時にエラー（無視して続行）: {e}")
-
-    # 新しくコレクションを作り直す
+    # 4) 既存コレクション取得（なければ作成）
     collection = client.get_or_create_collection(
         name=collection_name,
         embedding_function=openai_ef,
     )
 
-    # ↓ ここから下（ids / documents / metadatas 作って add する処理）は今のままでOK
+    # 5) すでにデータが入っている場合は、「中身だけ」全削除（コレクション自体は残す）
+    try:
+        existing_count = collection.count()
+        if existing_count > 0:
+            all_docs = collection.get()  # 小規模前提なので全部取得でOK
+            all_ids = all_docs.get("ids", [])
+            if all_ids:
+                collection.delete(ids=all_ids)
+                print(f"既存コレクション '{collection_name}' から {len(all_ids)} 件を削除しました。")
+    except Exception as e:
+        # ここでのエラーは致命的ではないのでログだけ出して続行
+        print(f"既存データ削除時にエラー（無視して続行）: {e}")
+
+    # 6) 新しいデータを追加
     ids: List[str] = []
     documents: List[str] = []
     metadatas: List[dict] = []
