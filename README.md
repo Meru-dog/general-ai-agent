@@ -286,12 +286,13 @@ const API_URL = "http://localhost:8000/api/agent/ask";
    - `OPENAI_API_KEY`: あなたのOpenAI APIキー
    - `BUILD_INDEX_ON_STARTUP`: `false`（デフォルト。起動時のインデックス構築をスキップ）
 
-5. **インデックスの事前構築（オプション）**
-   デプロイ後、Renderのシェルから実行：
-   ```bash
-   python -m app.rag.build_index
-   ```
-   または、初回デプロイ時に`BUILD_INDEX_ON_STARTUP=true`に設定して起動後、`false`に戻す。
+5. **インデックスの自動構築**
+   - アプリケーション起動時に、インデックスが空（0件）の場合は自動的に構築されます
+   - 手動で構築したい場合は、Renderのシェルから実行：
+     ```bash
+     python -m app.rag.build_index
+     ```
+   - または、初回デプロイ時に`BUILD_INDEX_ON_STARTUP=true`に設定して強制的に構築（起動後、`false`に戻すことも可能）
 
 6. **注意事項**
    - `documents/`ディレクトリがGitHubに含まれていることを確認
@@ -324,7 +325,14 @@ const API_URL = "http://localhost:8000/api/agent/ask";
 - 環境変数`OPENAI_API_KEY`が正しく設定されているか確認
 - Renderのログを確認してエラー内容を確認
 - `documents/`ディレクトリがデプロイされているか確認
-- インデックスが構築されているか確認（Renderのシェルから`python -m app.rag.build_index`を実行）
+- インデックスが構築されているか確認（起動時に自動構築されるはずですが、失敗した場合は手動で`python -m app.rag.build_index`を実行）
+
+**問題: RAG検索で0件ヒットする**
+
+- 起動ログでインデックスの件数を確認（例: `インデックス確認完了（14件のチャンクが登録されています）`）
+- インデックスが0件の場合は、起動時に自動構築されるはずですが、構築に失敗している可能性があります
+- Renderのログで「インデックス構築完了」のメッセージを確認
+- 手動でインデックスを構築: `python -m app.rag.build_index`
 
 **問題: 起動がタイムアウトする**
 

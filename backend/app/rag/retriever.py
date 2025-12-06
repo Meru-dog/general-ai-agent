@@ -34,6 +34,17 @@ class RAGRetriever:
         count = self.collection.count()
         print(f"[RAGRetriever] collection='{config.CHROMA_COLLECTION}', "
               f"path='{config.CHROMA_DIR}', count={count}")
+        
+        # インデックスが空の場合の警告
+        if count == 0:
+            import warnings
+            warnings.warn(
+                f"RAGRetriever: インデックスが空です（count=0）。"
+                f"起動時にインデックスが自動構築されるはずですが、"
+                f"構築に失敗した可能性があります。"
+                f"手動で `python -m app.rag.build_index` を実行してください。",
+                UserWarning
+            )
 
     def search(self, query: str, n_results: int = 3) -> List[Dict]:
         """

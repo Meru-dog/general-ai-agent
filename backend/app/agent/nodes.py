@@ -89,15 +89,23 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
 
     # 文書依存 → RAG 実行
     query = state.input
-    results = rag_retriever.search(query)
-
-    titles = [r.get("document_title", "（タイトル不明）") for r in results]
-    if results:
-        # 例として最大3件までタイトルを表示
-        sample_titles = "、".join(titles[:3])
-        msg = f"RAG実行: {len(results)}件ヒット（例: {sample_titles}）"
+    
+    # インデックスの状態を確認
+    index_count = rag_retriever.collection.count()
+    if index_count == 0:
+        msg = f"RAG実行: インデックスが空です（{index_count}件）。インデックスが構築されていない可能性があります。"
+        print(f"警告: {msg}")
+        state.rag_result = []
     else:
-        msg = "RAG実行: 0件ヒット（関連する手元文書が見つかりませんでした）"
+        results = rag_retriever.search(query)
+        titles = [r.get("document_title", "（タイトル不明）") for r in results]
+        if results:
+            # 例として最大3件までタイトルを表示
+            sample_titles = "、".join(titles[:3])
+            msg = f"RAG実行: {len(results)}件ヒット（例: {sample_titles}）"
+        else:
+            msg = f"RAG実行: 0件ヒット（インデックスには{index_count}件のチャンクがありますが、関連する文書が見つかりませんでした）"
+        state.rag_result = results
 
     state.steps.append(
         StepLog(
@@ -107,7 +115,6 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
         )
     )
 
-    state.rag_result = results
     return state
 
 
