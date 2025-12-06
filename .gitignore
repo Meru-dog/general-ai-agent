@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.log
+
+# venv
+.venv/
+venv/
+
+# Chroma DB / その他ローカルDB
+backend/app/chroma_db/
+
+# 環境変数
+.env
+*.env
+
+# Node / frontend
+node_modules/
+dist/
+build/
+
+# OS
+.DS_Store
