@@ -8,6 +8,10 @@ import "./App.css";
 // 環境変数 VITE_API_URL から取得（設定されていない場合はローカル開発用のデフォルト値を使用）
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/agent/ask";
 
+// デバッグ用：使用されているAPI URLをコンソールに出力（本番環境でも確認可能）
+console.log("API URL:", API_URL);
+console.log("Environment variable VITE_API_URL:", import.meta.env.VITE_API_URL);
+
 function App() {
   // ユーザーの入力（指示文）を保持する state
   const [input, setInput] = useState("");
@@ -62,8 +66,24 @@ function App() {
       setSteps(data.steps ?? []);
     } catch (err) {
       // 例外発生時にはコンソールに出力し、ユーザーにエラーメッセージを表示
-      console.error(err);
-      setError("エージェントからの回答取得に失敗しました。サーバーが起動しているか確認してください。");
+      console.error("API呼び出しエラー:", err);
+      console.error("使用されたAPI URL:", API_URL);
+      console.error("エラー詳細:", {
+        message: err.message,
+        stack: err.stack,
+        name: err.name
+      });
+      
+      // より詳細なエラーメッセージを表示
+      let errorMessage = "エージェントからの回答取得に失敗しました。";
+      if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+        errorMessage += " ネットワークエラーが発生しました。API URLを確認してください: " + API_URL;
+      } else if (err.message.includes("CORS")) {
+        errorMessage += " CORSエラーが発生しました。バックエンドのCORS設定を確認してください。";
+      } else {
+        errorMessage += " エラー: " + err.message;
+      }
+      setError(errorMessage);
     } finally {
       // 成功・失敗に関わらずローディング状態を解除
       setIsLoading(false);
