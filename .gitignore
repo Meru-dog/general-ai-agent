@@ -16,6 +16,9 @@ backend/app/chroma_db/
 # 環境変数
 .env
 *.env
+frontend/.env
+frontend/.env.local
+frontend/.env.production
 
 # Node / frontend
 node_modules/

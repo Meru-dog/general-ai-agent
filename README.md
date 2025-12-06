@@ -171,12 +171,19 @@ cd frontend
 npm install
 ```
 
-`src/App.jsx` で API URL を設定：
+**環境変数の設定（重要）**
 
-```js
-const API_URL = "https://<YOUR_BACKEND_URL>/api/agent/ask";
-// ローカル開発時の例： "http://localhost:8000/api/agent/ask"
+`frontend/.env` ファイルを作成して、バックエンドAPIのURLを設定します：
+
+```bash
+# frontend/.env
+VITE_API_URL=http://localhost:8000/api/agent/ask
 ```
+
+**注意：**
+- `.env` ファイルはGitにコミットされません（`.gitignore`で除外されています）
+- デプロイ環境（Vercel等）では、環境変数として `VITE_API_URL` を設定してください
+- ローカル開発時は上記のデフォルト値（`http://localhost:8000/api/agent/ask`）が使用されます
 
 ローカル開発サーバー起動：
 
@@ -204,7 +211,11 @@ Render 上でも初回起動時にインデックスが構築されます。
 * Framework Preset：Vite
 * Build Command：`npm run build`
 * Output Directory：`dist`
-* 環境に応じて `API_URL` を本番バックエンド URL に設定
+* **環境変数の設定（重要）**：
+  * Vercelのダッシュボードで環境変数を追加：
+    * 変数名：`VITE_API_URL`
+    * 値：`https://your-backend-url.onrender.com/api/agent/ask`
+  * これにより、コードにURLをハードコードせずにデプロイできます
 
 ---
 

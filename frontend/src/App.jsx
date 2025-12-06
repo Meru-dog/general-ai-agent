@@ -5,9 +5,8 @@ import { useState } from "react";
 import "./App.css";
 
 // バックエンドのエージェントAPIのURL
-// ・ローカル開発： http://localhost:8000/api/agent/ask
-// ・デプロイ後   ： https://<renderのURL>/api/agent/ask に書き換え
-const API_URL = "https://general-ai-agent.onrender.com/api/agent/ask";
+// 環境変数 VITE_API_URL から取得（設定されていない場合はローカル開発用のデフォルト値を使用）
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/agent/ask";
 
 function App() {
   // ユーザーの入力（指示文）を保持する state
