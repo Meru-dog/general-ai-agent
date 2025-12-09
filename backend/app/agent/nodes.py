@@ -1,19 +1,17 @@
-# backend/app/agent/nodes.py
-
 # 各ステップ（ノード）の処理内容を定義するモジュール
-
 from app.agent.types import AgentState, StepLog  # エージェントの状態とログ用の型
 from app.rag.retriever import RAGRetriever      # RAG 用の検索クラス
 from app import config                          # 設定（LLMモデル名やAPIキー）を読み込む
 
 from langchain_openai import ChatOpenAI         # OpenAI のチャットモデルクラス
+from langchain_core.messages import SystemMessage, HumanMessage
 
 
 # ===== LLM の初期化 =====
 
 # OpenAI LLM（推論用）を初期化
 llm = ChatOpenAI(
-    model=config.LLM_MODEL,      # 例: "gpt-4.1-mini" など、config に定義したモデル名を指定
+    model=config.LLM_MODEL,       # 例: "gpt-4.1-mini" など、config に定義したモデル名を指定
     api_key=config.OPENAI_API_KEY  # OpenAI API キー
 )
 
@@ -32,64 +30,90 @@ except Exception as e:
 
 def analyze_intent(state: AgentState) -> AgentState:
     """
-    ユーザー入力の意図をざっくり分類して、
-    ・文書依存（手元の documents が前提）
-    ・非文書依存（一般知識で回答可）
+    ユーザー入力の意図を LLM で大まかに分類して、
+    ・文書依存（手元の documents が前提） -> doc_dependent
+    ・非文書依存（一般知識で回答可）     -> general
     のどちらかを state.intent に書き込むノード。
     """
 
-    text = state.input  # ユーザーからの入力文
+    text = state.input.strip()
 
-    # 非常にシンプルなキーワード判定ロジック
-    # 「この契約書」「NDA」「業務委託」などが含まれていれば
-    # 「手元文書に依存している可能性が高い」とみなす
+    # フォールバック用のキーワードベース判定
     doc_keywords = ["この契約書", "以下の文書", "ドキュメント", "NDA", "業務委託"]
-    if any(k in text for k in doc_keywords):
-        intent = "doc_dependent"  # 文書依存
-        msg = "質問意図解析: 文書依存（手元の documents に基づく回答が必要と判断）"
-    else:
-        intent = "general"        # 非文書依存
-        msg = "質問意図解析: 非文書依存（一般的な知識・推論で回答可能と判断）"
 
-    # state に意図をセット
+    intent = "general"
+    reason = "初期値（一般的な質問とみなす）です。"
+
+    try:
+        classifier_instruction = (
+            "あなたは、ユーザーの質問が『手元の具体的な文書（契約書・規約・マニュアルなど）"
+            "に依存しているかどうか』を判定する分類器です。\n"
+            "出力は次のいずれか1語のみとし、説明や理由は書かないでください。\n"
+            "- doc_dependent\n"
+            "- general"
+        )
+        res = llm.invoke(
+            [
+                SystemMessage(content=classifier_instruction),
+                HumanMessage(content=f"ユーザーの質問:\n{text}"),
+            ]
+        )
+        label = (res.content or "").strip().lower()
+
+        if label.startswith("doc"):
+            intent = "doc_dependent"
+            reason = "LLM判定: 手元の文書を前提とした質問と判断しました。"
+        elif label.startswith("gen"):
+            intent = "general"
+            reason = "LLM判定: 一般知識で回答可能な質問と判断しました。"
+        else:
+            # LLMの出力が想定外だった場合はキーワードベースで判定
+            if any(k in text for k in doc_keywords):
+                intent = "doc_dependent"
+                reason = "LLM出力が想定外だったため、キーワードベースで文書依存と判定しました。"
+            else:
+                intent = "general"
+                reason = "LLM出力が想定外だったため、キーワードベースで非文書依存と判定しました。"
+
+    except Exception as e:
+        print(f"警告: analyze_intent の LLM呼び出しに失敗しました: {e}")
+        if any(k in text for k in doc_keywords):
+            intent = "doc_dependent"
+            reason = "LLM呼び出しに失敗したため、キーワードベースで文書依存と判定しました。"
+        else:
+            intent = "general"
+            reason = "LLM呼び出しに失敗したため、キーワードベースで非文書依存と判定しました。"
+
     state.intent = intent
+    # RAGを使う可能性があるかどうかの目安として source をセット（ログ・フロント用）
+    state.source = "rag" if intent == "doc_dependent" else "llm"
 
     # ステップログに記録
     state.steps.append(
         StepLog(
             step_id=len(state.steps) + 1,  # 連番
             action="analysis",             # 処理の種類
-            content=msg,                   # ログメッセージ
+            content=f"質問意図解析: {'文書依存' if intent == 'doc_dependent' else '非文書依存'}（{reason}）",
         )
     )
 
-    return state  # 更新した state を返す
+    return state
 
 
 def should_use_rag(state: AgentState) -> bool:
     """
-    analyze_intent で付けたログから、
-    「文書依存」か「非文書依存」かを判定して True/False を返す。
-
-    ※ 今回の LangGraph フローでは直接は使っていないが、
-      「条件分岐ノード」を作るときに利用できるよう残しておく。
+    （オプション）「文書依存」かどうかを見て True/False を返すヘルパー。
+    今回の LangGraph フローでは直接は使っていないが、
+    条件分岐ノードを作る場合などに利用可能。
     """
     if not state.steps:
-        # ステップログが無い場合は念のため False
         return False
 
-    # 直近のステップログ（通常は analyze_intent の結果）
     last_log = state.steps[-1].content
-
-    # 「非文書依存」と明示されていたら RAG は使わない
     if "非文書依存" in last_log:
         return False
-
-    # 「文書依存」と書かれているなら RAG を使う
     if "文書依存" in last_log:
         return True
-
-    # どちらとも判定できない場合はデフォルトで使わない
     return False
 
 
@@ -99,10 +123,11 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
     """
     state.intent を見て、文書依存なら RAG を実行するノード。
     結果は state.rag_result に格納する。
+    - intent != "doc_dependent" の場合は RAG をスキップ
+    - doc_dependent だが 0 件ヒットの場合は intent を general にフォールバック
     """
     # intent が "doc_dependent" でなければ RAG はスキップ
     if getattr(state, "intent", None) != "doc_dependent":
-        # 文書依存じゃない → RAGスキップ
         state.steps.append(
             StepLog(
                 step_id=len(state.steps) + 1,
@@ -110,8 +135,8 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
                 content="RAGスキップ: 非文書依存と判断されたため、手元文書は参照しませんでした。",
             )
         )
-        # RAG結果は空として扱う
         state.rag_result = []
+        state.source = "llm"
         return state
 
     # ここに来たら「文書依存」と判断されている
@@ -122,6 +147,9 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
         msg = "RAG実行: RAGRetriever が初期化されていません。環境変数やインデックスの設定を確認してください。"
         print(f"警告: {msg}")
         state.rag_result = []
+        # RAGが使えないので一般LLMモードにフォールバック
+        state.intent = "general"
+        state.source = "llm"
     else:
         try:
             # インデックス（Chroma内のデータ）が何件入っているか確認
@@ -129,24 +157,36 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
 
             if index_count == 0:
                 # インデックスが空の場合
-                msg = f"RAG実行: インデックスが空です（{index_count}件）。インデックスが構築されていない可能性があります。"
+                msg = (
+                    f"RAG実行: インデックスが空です（{index_count}件）。"
+                    f"インデックスが構築されていない可能性があります。"
+                    f"一般知識モードにフォールバックします。"
+                )
                 print(f"警告: {msg}")
                 state.rag_result = []
+                state.intent = "general"
+                state.source = "llm"
             else:
                 # 通常の RAG 検索を実行
                 results = rag_retriever.search(query)
 
-                # タイトルだけ抜き出してログ用メッセージを作成
-                titles = [r.get("document_title", "（タイトル不明）") for r in results]
                 if results:
-                    # 例として最大3件までタイトルを表示
+                    # タイトルだけ抜き出してログ用メッセージを作成
+                    titles = [r.get("document_title", "（タイトル不明）") for r in results]
                     sample_titles = "、".join(titles[:3])
                     msg = f"RAG実行: {len(results)}件ヒット（例: {sample_titles}）"
+                    state.rag_result = results
+                    state.source = "rag"
                 else:
-                    msg = f"RAG実行: 0件ヒット（インデックスには{index_count}件のチャンクがありますが、関連する文書が見つかりませんでした）"
-
-                # state に RAG結果を保存
-                state.rag_result = results
+                    msg = (
+                        f"RAG実行: 0件ヒット（インデックスには{index_count}件のチャンクがありますが、"
+                        f"関連する文書が見つかりませんでした）。一般知識モードにフォールバックします。"
+                    )
+                    print(f"警告: {msg}")
+                    state.rag_result = []
+                    # 文書はあるが該当がない → 一般知識で回答
+                    state.intent = "general"
+                    state.source = "llm"
 
         except Exception as e:
             # RAG実行中にエラーが発生した場合
@@ -154,8 +194,10 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
             print(f"警告: {error_msg}")
             import traceback
             print(traceback.format_exc())
-            msg = f"RAG実行: エラーが発生しました（{error_msg}）"
+            msg = f"RAG実行: エラーが発生しました（{error_msg}）。一般知識モードにフォールバックします。"
             state.rag_result = []
+            state.intent = "general"
+            state.source = "llm"
 
     # RAG の実行（またはスキップ）結果をステップログに記録
     state.steps.append(
@@ -207,15 +249,12 @@ def generate_answer(state: AgentState) -> AgentState:
     - 文書依存の場合は RAG の文書内容を優先
     - 非文書依存の場合は一般知識＋参考情報として利用
     """
-
     # RAG結果（state.rag_result）を安全に取り出す
     rag_result = getattr(state, "rag_result", []) or []
-    # RAG結果をプロンプト用のテキストに整形する
     rag_context_text = _format_rag_context(rag_result)
 
     # 文書依存フラグにより、プロンプトの指示を少し変える
     if getattr(state, "intent", None) == "doc_dependent":
-        # 文書依存の場合：手元文書の内容を優先するよう指示
         context_note = (
             "以下の『参考情報』は、ユーザーの手元にある documents から取得したものです。\n"
             "必ずこの参考情報の内容を優先して回答してください。\n"
@@ -223,11 +262,18 @@ def generate_answer(state: AgentState) -> AgentState:
             "不明な点は『手元の文書には記載がありません』と明示してください。"
         )
     else:
-        # 非文書依存の場合：一般知識＋参考情報（あれば）を使ってよい
         context_note = (
             "必要に応じて、以下の参考情報も参照しつつ、一般的な知識・推論に基づいて回答してください。\n"
             "不明な点や、手元の情報だけでは判断できない点があれば、その旨も明示してください。"
         )
+
+    # 将来の拡張用：chat_history があれば、簡易的に参照できるようにする（まだフロントからは未利用）
+    history_lines = []
+    for turn in getattr(state, "chat_history", [])[-5:]:
+        role = turn.get("role", "user")
+        content = turn.get("content", "")
+        history_lines.append(f"{role}: {content}")
+    history_text = "\n".join(history_lines) if history_lines else "（このセッションの会話履歴は使用していません）"
 
     # LLM に渡す最終プロンプトを組み立てる
     prompt = f"""
@@ -236,6 +282,11 @@ def generate_answer(state: AgentState) -> AgentState:
 ユーザーからの質問:
 ---
 {state.input}
+---
+
+これまでの会話履歴（参考・最大5ターン）:
+---
+{history_text}
 ---
 
 {context_note}
@@ -255,25 +306,21 @@ def generate_answer(state: AgentState) -> AgentState:
 """
 
     try:
-        # LLM にプロンプトを送信して回答を取得
         res = llm.invoke(prompt)
         answer = res.content.strip()
     except Exception as e:
-        # LLM呼び出しが失敗した場合のエラーハンドリング
         error_msg = f"LLM呼び出しに失敗しました: {str(e)}"
         print(f"Error in generate_answer: {error_msg}")
         answer = f"申し訳ございません。回答の生成中にエラーが発生しました: {error_msg}"
 
-    # 生成した回答を state にセット
     state.output = answer
 
-    # ステップログに「回答を生成した」ことを記録
     state.steps.append(
         StepLog(
             step_id=len(state.steps) + 1,
             action="answer",
-            content="RAG結果を踏まえて回答を生成"
+            content="RAG結果と質問内容を踏まえて回答を生成しました。"
         )
     )
 
-    return state  # 更新した state を返す
+    return state
