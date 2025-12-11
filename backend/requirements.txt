@@ -8,3 +8,4 @@ langchain-openai
 python-multipart
 pypdf
 python-docx
+tavily-python

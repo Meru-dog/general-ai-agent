@@ -1,100 +1,327 @@
+/* frontend/src/App.css */
+
+/* ルートコンテナ */
 .app {
-  max-width: 800px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 24px;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 24px 28px 32px;
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+  color: #111827;
 }
 
+/* タイトル周り */
 .app-title {
-  font-size: 1.6rem;
-  margin-bottom: 16px;
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin: 0 0 8px;
 }
 
+.app-subtitle {
+  font-size: 0.95rem;
+  color: #6b7280;
+  margin-bottom: 20px;
+}
+
+/* セクション共通 */
+.section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.section-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.section-tag {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background-color: #eef2ff;
+  color: #4f46e5;
+}
+
+/* 文書登録エリア（手入力＋ファイル）想定 */
+.document-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.1fr);
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .document-section {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.document-card {
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  padding: 12px 14px;
+  background: #f9fafb;
+}
+
+.document-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.document-card-description {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin-bottom: 10px;
+}
+
+/* ラベル＆入力 */
+.question-label,
+.input-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.helper-text {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 4px;
+}
+
+/* テキスト入力欄（質問／文書内容など共通） */
+.question-input,
+.textarea-input {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.question-input:focus,
+.textarea-input:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.15);
+  background-color: #f9fafb;
+}
+
+/* 文書タイトル */
+.text-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 0.9rem;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.15);
+  background-color: #f9fafb;
+}
+
+/* ファイル入力 */
+.file-input {
+  display: block;
+  width: 100%;
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
+.upload-message {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: #059669;
+}
+
+/* 文書登録ボタン群 */
+.document-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* 質問フォーム */
 .question-form {
+  margin-top: 20px;
+}
+
+.question-form-inner {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: 10px;
 }
 
-.question-label {
-  font-weight: 500;
-}
-
-.question-input {
-  width: 100%;
-  margin-top: 8px;
-  padding: 8px;
-  font-size: 1rem;
-  resize: vertical;
+/* 送信ボタン */
+.submit-button,
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: none;
+  padding: 8px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.08s ease, background-color 0.15s ease;
 }
 
 .submit-button {
-  align-self: flex-end;
-  padding: 8px 16px;
-  font-size: 0.95rem;
-  cursor: pointer;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  color: #ffffff;
+  box-shadow: 0 10px 18px rgba(79, 70, 229, 0.25);
 }
 
-.answer-section,
-.references-section {
+.submit-button:hover {
+  background: linear-gradient(135deg, #4338ca, #4f46e5);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 22px rgba(79, 70, 229, 0.3);
+}
+
+.submit-button:active {
+  transform: translateY(0);
+  box-shadow: 0 6px 14px rgba(79, 70, 229, 0.2);
+}
+
+.secondary-button {
+  background-color: #e5e7eb;
+  color: #374151;
+  box-shadow: 0 2px 4px rgba(148, 163, 184, 0.35);
+}
+
+.secondary-button:hover {
+  background-color: #d1d5db;
+}
+
+.submit-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+/* エラーメッセージ */
+.error-message {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #fecaca;
+  background-color: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+/* 回答セクション */
+.answer-section {
   margin-top: 24px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background-color: #f9fafb;
+}
+
+.answer-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 6px;
 }
 
 .answer-text {
   white-space: pre-wrap;
-  background-color: #f5f5f5;
-  padding: 12px;
-  border-radius: 4px;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: #111827;
 }
 
 .placeholder-text {
-  color: #777;
+  font-size: 0.9rem;
+  color: #9ca3af;
 }
 
-.error-message {
-  margin-top: 8px;
-  color: #b00020;
+/* 実行ログセクション */
+.steps-section {
+  margin-top: 22px;
 }
 
-.reference-card {
-  margin-top: 12px;
-  padding: 10px;
-  border-radius: 4px;
-  border: 1px solid #ddd;
+.steps-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.step-card {
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #eef2ff;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+}
+
+.step-header {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #4f46e5;
+}
+
+.step-content {
+  white-space: pre-wrap;
+  color: #374151;
+}
+
+/* 参考情報（RAG/Webコンテキスト）を表示する場合のスタイル想定 */
+.references-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed #e5e7eb;
 }
 
 .reference-title {
   font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
 }
 
 .reference-score {
-  font-size: 0.85rem;
-  color: #555;
-  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin-top: 2px;
 }
 
 .reference-snippet {
-  margin-top: 6px;
-}
-
-/* 文書登録セクション */
-.upload-section {
-  margin-bottom: 32px;
-  padding: 16px;
-  border-radius: 6px;
-  border: 1px solid #000000;
-  background-color: #7c8bff;
-}
-
-.upload-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 8px;
-}
-
-.upload-message {
-  margin-top: 8px;
-  color: #006400;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #4b5563;
 }

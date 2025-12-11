@@ -46,3 +46,5 @@ CHROMA_COLLECTION: str = "documents"
 # =========================
 # 文書配置ディレクトリ（backend/app/documents）
 DOCUMENTS_DIR = BASE_DIR / "documents"
+
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")

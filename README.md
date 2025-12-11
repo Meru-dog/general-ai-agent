@@ -1,28 +1,88 @@
 # 汎用タスク実行 AI エージェント（General AI Agent）
 
-ユーザーが自然言語で指示すると、
-エージェントが「文書依存かどうか」を自動判定し、
+自然言語で指示を送ると、
 
-* 文書依存 → 手元ドキュメントに対する RAG 検索＋回答
-* 非文書依存 → LLM 単体での一般的な回答
+* その質問が **「手元文書に依存するか」**
+* それとも **「一般知識だけで答えられるか」**
+* さらに **「Web で最新情報を調べる必要があるか」**
+
+をエージェントが自動で判定し、
+
+* 文書依存 → 手元ドキュメントに対する **RAG 検索＋回答**
+* 非文書依存 → **LLM 単体での一般的な回答**
+* ニュース／相場など → **Web 検索＋LLM による要約**
 
 を行うシンプルな **エージェント型 Web アプリケーション** です。
+
+フロントエンドから
+
+* 文書の手動登録（コピペ）
+* ファイルからの登録（`.txt / .md / .pdf / .docx`）
+* 質問入力 → 回答＋実行ログの確認
+
+までをブラウザだけで完結できます。
 
 ---
 
 ## 1. 特徴
 
-* 🧠 **意図解析**
-  入力された質問文をもとに、「手元文書前提か／一般知識で足りるか」をざっくり判定
+### 🧠 意図解析（Intent Analysis）
 
-* 📄 **RAG 連携**
-  文書依存と判定された場合のみ、Chroma＋OpenAI Embedding で RAG 検索を実行
+* ユーザー入力をもとに、
 
-* 🧾 **思考ログの可視化**
-  エージェントのステップ（意図解析 / RAG 実行 / 回答生成）を簡易ログとしてフロントに表示
+  * 「手元文書前提（doc_dependent）」か
+  * 「一般知識で足りるか（general）」
+    を LangGraph 上のノードで簡易判定します。
+* アプリ側では、この判定に応じて RAG・Web 検索の使い方を切り替えています。
 
-* 🌐 **Web アプリとして利用可能**
-  React フロントから、ブラウザだけで利用可能
+### 📄 RAG（手元文書ベースの検索）
+
+* Chroma + OpenAI Embedding によるシンプルな RAG 実装です。
+* 文書の登録方法は 2 通りあります：
+
+  1. 画面上のフォームから **タイトル＋本文を直接コピペして登録**
+  2. 画面の「ファイルから登録」から **`.txt / .md / .pdf / .docx` をアップロード**
+* 登録された文書はチャンク化され、Chroma に保存されます。
+* 「文書依存」と判定された質問については、RAG 検索結果を優先して回答を生成します。
+
+### 📎 ファイルアップロード対応
+
+* フロントからアップロードできる形式：
+
+  * `.txt`, `.md`, `.markdown`, `.json`（UTF-8 テキスト）
+  * `.pdf`（テキスト埋め込み型の PDF）
+  * `.docx`（Word ファイル）
+* バックエンド側でテキスト抽出したうえで、RAG 用インデックスに登録します。
+* スキャン画像だけの PDF は、テキストが抽出できないためエラーとなります。
+
+### 🌐 Web 検索連携
+
+* 「今日」「最近」「ニュース」「相場」「為替」「株価」「金利」などのキーワードを含む質問の場合、
+
+  * Web 検索（Tavily API）を自動実行し、
+  * 結果を LLM のコンテキストに組み込んで回答します。
+* 文書依存の質問の場合は、**手元文書の内容を優先**しつつ、必要に応じて Web 結果を補足情報として利用します。
+
+### 🧾 思考ログの可視化
+
+* LangGraph の各ステップ（ノード）の実行状況を、
+
+  * `analysis`（意図解析）
+  * `rag`（RAG 実行 or スキップ）
+  * `web-search`（Web 検索実行 or スキップ）
+  * `answer`（回答生成）
+* といった形でフロントに表示します。
+* 「RAG を使ったのか」「Web 検索を実行したのか」が一目でわかります。
+
+### 💻 Web アプリとして利用可能
+
+* フロントエンドは React + Vite。
+* バックエンドは FastAPI。
+* 必要な API URL を `.env` / Vite の環境変数で切り替えれば、
+
+  * ローカル開発（localhost）
+  * Render / Vercel などへのデプロイ
+    の両方でそのまま利用できます。
 
 ---
 
@@ -32,60 +92,99 @@
 User (Browser)
    ↓
 React Frontend
-   ↓  POST /api/agent/ask  (JSON: { input })
+   ├─ 文書登録フォーム（タイトル＋本文を直接POST）
+   ├─ ファイルアップロード（txt/md/pdf/docx）
+   └─ 質問送信フォーム
+        ↓  POST /api/agent/ask  (JSON: { input })
 FastAPI Backend
    ↓
 LangGraph エージェント
    ├─ ノード1: 質問意図解析 (analysis)
    ├─ ノード2: RAG 実行 or スキップ (rag)
-   └─ ノード3: 回答生成 (answer)
-        └─ OpenAI Chat モデル
+   ├─ ノード3: Web 検索実行 or スキップ (web-search)
+   └─ ノード4: 回答生成 (answer)
+        ├─ OpenAI Chat モデル
+        └─ 手元文書＋Web検索結果を統合
    ↓
-応答JSON: { output, steps[] } をフロントに返却
+応答 JSON: { output, steps[] } をフロントに返却
 ```
 
 ---
 
 ## 3. 技術スタック
 
-* Backend
+### Backend
 
-  * Python 3.11+
-  * FastAPI
-  * LangGraph
-  * Chroma
-  * OpenAI API（Chat + Embedding）
-* Frontend
+* Python 3.11+
+* FastAPI
+* LangGraph
+* Chroma DB（ローカルディスク保存）
+* OpenAI API
 
-  * React
-  * Vite
-* Infra（例）
+  * Chat モデル（例：`gpt-4.1-mini` など）
+  * Embedding モデル（例：`text-embedding-3-small`）
+* Tavily Search API（Web 検索）
 
-  * Backend: Render
-  * Frontend: Vercel
+### Frontend
+
+* React 18
+* Vite
+* Fetch API を用いたシンプルな API 呼び出し
+
+### Infra（例）
+
+* Backend: Render / Railway / Fly.io など
+* Frontend: Vercel / Netlify など
 
 ---
 
-## 4. 公開版アプリの使い方（利用者向け）
+## 4. 画面イメージと使い方（利用者向け）
 
-※ 実際の URL に置き換えてください。
+### 4-1. 文書登録（手入力）
 
-1. フロントエンド URL を開く
-   例：`https://<YOUR_FRONTEND_URL>`
+1. 画面上部の「文書登録（RAG対象にする文書）」セクションで、
 
-2. テキスト入力欄に指示を入力
+   * 文書タイトル
+   * 文書内容（全文）
+     を入力します。
+2. 「文書を登録」ボタンを押すと、バックエンド側で
 
-   * 例1（一般質問）：「このアプリの目的は？」
-   * 例2（文書依存質問）：「業務委託契約の条項としてはどのようなものがありますか？」
+   * テキストをチャンク化
+   * Chroma に保存
+     が行われ、RAG 対象として利用可能になります。
 
-3. 「送信」をクリックすると：
+### 4-2. ファイルから登録
 
-   * 上部に「回答」が表示
-   * 下部に「実行ログ（analysis / rag / answer）」が表示され、
+1. 「ファイルから登録」セクションで、
+
+   * `.txt`, `.md`, `.pdf`, `.docx` などのファイルを選択します。
+2. 「ファイルをアップロードして登録」ボタンを押すと、
+
+   * サーバー側でテキスト抽出
+   * チャンク化して Chroma に保存
+     が実行されます。
+3. 成功すると、画面に「◯◯.pdf を RAG インデックスに登録しました」といったメッセージが表示されます。
+
+### 4-3. 質問を送る
+
+1. 下部の「指示（質問）を入力してください：」欄に質問を入力します。
+
+   例）
+
+   * 「この契約書の成果物の権利帰属を要約して」
+   * 「この NDA の秘密保持義務の範囲を整理して」
+   * 「今日の為替相場を教えて」
+   * 「最近の AI 規制に関する動向を教えて」
+
+2. 「送信」ボタンを押すと、
+
+   * 上部に **回答** が表示されます。
+   * 下部に **実行ログ（analysis / rag / web-search / answer）** が表示され、
 
      * 文書依存かどうか
-     * RAGが何件ヒットしたか
-     * 回答生成ステップ
+     * RAG が何件ヒットしたか
+     * Web 検索を実行したか
+     * どの順番でステップが実行されたか
        が確認できます。
 
 ---
@@ -96,20 +195,22 @@ LangGraph エージェント
 general-ai-agent/
 ├─ backend/
 │  ├─ app/
-│  │  ├─ main.py              # FastAPI エントリポイント (/api/agent/ask)
-│  │  ├─ config.py            # モデル名・パスなどの設定
+│  │  ├─ main.py              # FastAPI エントリポイント
+│  │  ├─ config.py            # モデル名・パス・APIキーなどの設定
 │  │  ├─ agent/
-│  │  │  ├─ graph_builder.py  # LangGraph グラフ定義
-│  │  │  ├─ nodes.py          # 各ステップ（analysis / rag / answer）の実装
-│  │  │  └─ types.py          # AgentState / StepLog など
-│  │  └─ rag/
-│  │     ├─ document_loader.py
-│  │     ├─ index_builder.py
-│  │     ├─ retriever.py
-│  │     └─ llm_client.py     # （必要に応じて）
-│  ├─ documents/              # RAG 対象の文書 (.txt 等)
+│  │  │  ├─ graph_builder.py  # LangGraph グラフ定義（analysis / rag / web-search / answer）
+│  │  │  ├─ nodes.py          # 各ステップの実装
+│  │  │  └─ types.py          # AgentState / StepLog などの型
+│  │  ├─ rag/
+│  │  │  ├─ document_loader.py
+│  │  │  ├─ index_builder.py
+│  │  │  ├─ build_index.py    # 初期インデックス構築スクリプト（任意）
+│  │  │  └─ retriever.py      # Chroma への登録・検索
+│  │  └─ tools/
+│  │     └─ web_search.py     # Tavily を使った Web 検索ラッパ
+│  ├─ documents/              # 必要に応じて初期文書を配置
 │  ├─ requirements.txt
-│  └─ .env                    # OpenAI キーなど（Git 管理外）
+│  └─ .env                    # OpenAI / Tavily キーなど（Git 管理外）
 └─ frontend/
    ├─ index.html
    ├─ package.json
@@ -123,137 +224,161 @@ general-ai-agent/
 
 ---
 
-## 6. 開発者向けセットアップ
+## 6. バックエンドセットアップ（開発者向け）
 
-### 6.1 バックエンド
+### 6-1. インストール
 
 ```bash
 cd backend
 
 python -m venv .venv
-source .venv/bin/activate  # Windows は .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
 ```
 
-`.env` を作成：
+### 6-2. 環境変数（`.env`）
+
+`backend/.env` を作成し、少なくとも次を定義します：
 
 ```bash
-# backend/.env
-OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxx"
-OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
+# OpenAI
+OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 OPENAI_LLM_MODEL="gpt-4.1-mini"
-CHROMA_DIR="./chroma_db"
+OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
+
+# Chroma
+CHROMA_DIR="./app/chroma_db"
 CHROMA_COLLECTION="documents"
-DOCUMENTS_DIR="./app/documents"  # リポジトリ構成に合わせて調整
+
+# 文書ディレクトリ（初期インデックス用に使う場合）
+DOCUMENTS_DIR="./app/documents"
+
+# Tavily（Web検索）
+TAVILY_API_KEY="tvly-xxxxxxxxxxxxxxxx"
 ```
 
-#### インデックス構築
+### 6-3. （任意）初期インデックス構築
+
+リポジトリにあらかじめ `documents/` を置いておき、初期インデックスを作りたい場合：
 
 ```bash
 cd backend
 python -m app.rag.build_index
 ```
 
-#### バックエンド起動
+※ アプリ起動後は、フロントからの「文書登録」「ファイルから登録」でインデックスを追加していく運用も可能です。
+
+### 6-4. バックエンド起動
 
 ```bash
 cd backend
 uvicorn app.main:app --reload
 ```
 
+* `http://localhost:8000/docs` から Swagger UI を確認できます。
+* `POST /api/agent/ask` でエージェント API をテストできます。
+* `POST /api/documents/register` / `POST /api/documents/upload` で文書登録 API をテストできます。
+
 ---
 
-### 6.2 フロントエンド
+## 7. フロントエンドセットアップ
 
 ```bash
 cd frontend
 npm install
 ```
 
-**環境変数の設定（重要）**
+### 7-1. 環境変数（Vite）
 
-`frontend/.env` ファイルを作成して、バックエンドAPIのURLを設定します：
+`frontend/.env.local` などに、バックエンドのエージェント API URL を指定します。
 
 ```bash
-# frontend/.env
-VITE_API_URL=http://localhost:8000/api/agent/ask
+# 例：ローカル開発
+VITE_API_URL="http://localhost:8000/api/agent/ask"
 ```
 
-**注意：**
-- `.env` ファイルはGitにコミットされません（`.gitignore`で除外されています）
-- デプロイ環境（Vercel等）では、環境変数として `VITE_API_URL` を設定してください
-- ローカル開発時は上記のデフォルト値（`http://localhost:8000/api/agent/ask`）が使用されます
+> ※ バックエンドの `/api/agent/ask` に直接向ける想定です。
+> デプロイ環境では Render 等の URL に置き換えてください。
 
-ローカル開発サーバー起動：
+必要に応じて、文書アップロード用の URL も環境変数化できます（例）：
+
+```bash
+VITE_UPLOAD_URL="http://localhost:8000/api/documents/upload"
+```
+
+### 7-2. 開発サーバー起動
 
 ```bash
 npm run dev
 ```
 
-ブラウザからアクセスして動作確認します。
+ブラウザで `http://localhost:5173` にアクセスして動作を確認します。
 
 ---
 
-## 7. デプロイ（概要）
+## 8. デプロイ（概要）
 
 ### Backend（例：Render）
 
 * Build Command：`pip install -r backend/requirements.txt`
 * Start Command：`cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-* 環境変数に `.env` と同等の値（OpenAI API キー等）を設定
-
-起動時に `index_builder` が自動実行される設計にしておけば、
-Render 上でも初回起動時にインデックスが構築されます。
+* 環境変数として `.env` 相当の値を設定（OPENAI_API_KEY / TAVILY_API_KEY など）
+* 永続化されたディスクを利用する場合は、`CHROMA_DIR` をそのパスに設定
 
 ### Frontend（例：Vercel）
 
 * Framework Preset：Vite
 * Build Command：`npm run build`
 * Output Directory：`dist`
-* **環境変数の設定（重要）**：
-  * Vercelのダッシュボードで環境変数を追加：
-    * 変数名：`VITE_API_URL`
-    * 値：`https://your-backend-url.onrender.com/api/agent/ask`
-  * これにより、コードにURLをハードコードせずにデプロイできます
+* `VITE_API_URL` / `VITE_UPLOAD_URL` を本番バックエンドの URL に合わせて設定
 
 ---
 
-## 8. 典型的なユースケース
+## 9. 典型的なユースケース
 
-* 自分の契約書・テンプレート集を `documents/` に入れておき、
+* 自分の契約書・テンプレート集を `documents/` に入れる or 画面から登録しておき、
 
   * 「この NDA の目的条項を要約して」
   * 「業務委託契約における成果物の権利帰属について教えて」
-    などと質問 → 文書依存と判定された場合のみ RAG 実行
+  * 「この雇用契約書の競業避止条項を整理して」
+    などと質問 → 文書依存と判定された場合に RAG 実行
 
-* 一方で、
+* 一方で、純粋な一般論や最新情報は Web 検索に任せる：
 
-  * 「このアプリは何をするもの？」
   * 「業務委託契約の一般的な条項を教えて」
-    のような質問は、一般的な LLM 回答で処理し、
-    不必要に RAG を叩かないことでコストを抑制
+  * 「今日のドル円相場を教えて」
+  * 「最近の生成AI規制のニュースをざっくりまとめて」
+    → 文書依存ではないと判定された場合、一般知識＋Web検索で回答
+
+* 社内ナレッジベースの簡易ビューア／QA ボットとして：
+
+  * 就業規則 / 社内ルール / 手順書 PDF をまとめてアップロード
+  * そこに対して QA を投げる
 
 ---
 
-## 9. 制約・今後の拡張
+## 10. 制約・今後の拡張
 
 ### 制約（現状）
 
-* Web検索や計算ツールなどは未実装（RAG＋LLM のみ）
-* 長期メモリ（継続する会話コンテキスト）は持たず、
-  1リクエストごとに完結する設計
-* 文書アップロードはサーバー側に事前配置する方式
+* Web 検索は Tavily API に依存
+* 会話履歴はセッション内の軽いコンテキスト利用にとどまり、
+
+  * 長期メモリ（ユーザーごとの継続的なコンテキスト保存）は未実装
+* 文書アップロードはプレーンテキスト／テキスト抽出前提
+
+  * 画像だけの PDF（スキャン）には対応していません
 
 ### 今後の拡張アイデア
 
-* Web検索ツールの統合
-* 簡単な計算ツール（日付計算、金額計算など）の追加
-* 会話セッション単位でのメモリ保持（LangGraph の state 拡張）
-* 所内ナレッジベースへの接続（注意深い権限・セキュリティ設計前提）
+* Web 検索 ON/OFF のトグルスイッチをフロントに実装
+* セッション単位のメモリ保持（LangGraph の state 拡張）によるマルチターン QA 強化
+* 文書ごとの管理機能（一覧表示／削除／タグ付け）
+* 所内ナレッジベースや DMS との連携（権限・セキュリティ設計を含めて）
 
 ---
 
-## 10. ライセンス
+## 11. ライセンス
 
-（必要に応じて追記：例：MIT License など）
+必要に応じて、MIT など任意の OSS ライセンスを付与してください。

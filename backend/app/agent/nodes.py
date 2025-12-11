@@ -2,6 +2,7 @@
 
 from app.agent.types import AgentState, StepLog
 from app.rag.retriever import RAGRetriever
+from app.tools.web_search import run_web_search
 from app import config
 
 from langchain_openai import ChatOpenAI
@@ -177,8 +178,64 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
 
     return state
 
+# ===== ノード3: 検索 =====
+def run_web_search_if_needed(state: AgentState) -> AgentState:
+    """
+    ユーザーの質問内容に応じて Web 検索を行う。
+    - 「最新」「最近」「今日」「ニュース」「株価」「金利」などのキーワード
+    - 「web検索」「ネットで調べて」などの明示的指示
+    が含まれる場合に Tavily で検索し、結果を state.web_search_result に格納する。
+    それ以外のときは何もせずそのまま返す。
+    """
+    question = state.input
 
-# ===== ノード3: 回答生成 =====
+    trigger_words = [
+        "最新",
+        "最近",
+        "今日",
+        "昨日",
+        "ニュース",
+        "相場",
+        "株価",
+        "金利",
+        "インフレ",
+        "為替",
+        "FX",
+        "web検索",
+        "Web検索",
+        "ネットで調べて",
+    ]
+
+    need_web = any(word in question for word in trigger_words)
+
+    if not need_web:
+        state.steps.append(
+            StepLog(
+                step_id=len(state.steps) + 1,
+                action="web-search",
+                content="Web検索は不要と判断（キーワードなし）。",
+            )
+        )
+        return state
+
+    # Web検索を実行
+    results = run_web_search(question, max_results=5)
+    state.web_search_result = results
+
+    # ログ
+    state.steps.append(
+        StepLog(
+            step_id=len(state.steps) + 1,
+            action="web-search",
+            content=f"Web検索を実行: {len(results)}件ヒット。",
+        )
+    )
+
+    return state
+
+
+# ===== ノード4: 回答生成 =====
+# ===== ノード4: 回答生成 =====
 
 def _format_rag_context(rag_result) -> str:
     if not rag_result:
@@ -200,23 +257,54 @@ def _format_rag_context(rag_result) -> str:
     return "\n\n".join(lines)
 
 
+def _format_web_context(web_result) -> str:
+    """
+    Web検索結果をLLMに渡しやすいテキストに整形する
+    """
+    if not web_result:
+        return "（Web検索結果はありませんでした）"
+
+    lines = []
+    for i, r in enumerate(web_result[:3], start=1):
+        title = r.get("title") or "（タイトル不明）"
+        url = r.get("url") or "（URL情報なし）"
+        # Tavily想定: content キーにサマリテキストが入っていることが多い
+        snippet = r.get("content") or r.get("snippet") or ""
+
+        lines.append(
+            f"[Web{i}] タイトル: {title}\n"
+            f"    URL: {url}\n"
+            f"    概要: {snippet}"
+        )
+
+    return "\n\n".join(lines)
+
+
 def generate_answer(state: AgentState) -> AgentState:
+    # ---- RAG コンテキスト整形 ----
     rag_result = getattr(state, "rag_result", []) or []
     rag_context_text = _format_rag_context(rag_result)
 
+    # ---- Web検索コンテキスト整形 ----
+    web_result = getattr(state, "web_search_result", []) or []
+    web_context_text = _format_web_context(web_result)
+
+    # ---- コンテキスト利用方針（intent に応じて文言を変える）----
     if getattr(state, "intent", None) == "doc_dependent":
         context_note = (
-            "以下の『参考情報』は、ユーザーの手元にある documents から取得したものです。\n"
-            "可能な限りこの参考情報の内容を優先して回答してください。\n"
+            "以下の『参考情報』のうち、まず手元の documents から取得した情報を優先して回答してください。\n"
+            "Web検索結果は補足情報として扱い、手元文書と矛盾する場合には手元文書を優先してください。\n"
             "参考情報に明示的に書かれていない内容を勝手に作らず、"
             "不明な点は『参考情報として取得した範囲では記載が見当たりません』と明示してください。"
         )
     else:
         context_note = (
-            "必要に応じて、以下の参考情報も参照しつつ、一般的な知識・推論に基づいて回答してください。\n"
+            "必要に応じて、以下の参考情報（手元文書およびWeb検索結果）も参照しつつ、"
+            "一般的な知識・推論に基づいて回答してください。\n"
             "不明な点や、手元の情報だけでは判断できない点があれば、その旨も明示してください。"
         )
 
+    # ---- 会話履歴（あれば）----
     history_lines = []
     for turn in getattr(state, "chat_history", [])[-5:]:
         role = turn.get("role", "user")
@@ -224,6 +312,7 @@ def generate_answer(state: AgentState) -> AgentState:
         history_lines.append(f"{role}: {content}")
     history_text = "\n".join(history_lines) if history_lines else "（このセッションの会話履歴は使用していません）"
 
+    # ---- プロンプト組み立て ----
     prompt = f"""
 あなたは、ユーザーの質問に対して日本語で丁寧に回答するアシスタントです。
 
@@ -239,15 +328,21 @@ def generate_answer(state: AgentState) -> AgentState:
 
 {context_note}
 
-参考情報（RAG検索結果）:
+参考情報（RAG検索結果＝手元の文書）:
 ---
 {rag_context_text}
+---
+
+参考情報（Web検索結果）:
+---
+{web_context_text}
 ---
 
 回答要件:
 - 日本語で回答すること
 - 手元の文書から読み取れる内容がある場合は、それをできるだけ具体的に示すこと
-- 文書に書かれていない推測は最小限にとどめること
+- Web検索結果がある場合は、その内容も参考にしつつ矛盾がないように統合すること
+- 文書やWeb結果に書かれていない推測は最小限にとどめること
 - 参考情報の範囲で確認できない点は「参考情報の範囲では記載が確認できません」と書くこと
 - 「手元の文書には存在しない」と断定しないこと（あくまで取得した参考情報の範囲で判断すること）
 
@@ -268,7 +363,7 @@ def generate_answer(state: AgentState) -> AgentState:
         StepLog(
             step_id=len(state.steps) + 1,
             action="answer",
-            content="RAG結果と質問内容を踏まえて回答を生成しました。"
+            content="RAG結果・Web検索結果と質問内容を踏まえて回答を生成しました。"
         )
     )
 

@@ -268,7 +268,7 @@ const handleFileUpload = async () => {
 
   {/* 新規: ファイルアップロード */}
   <div className="file-upload-block">
-    <h3>ファイルから登録</h3>
+    <h2>ファイルから登録</h2>
     <p className="help-text">
       現在はテキストファイル（.txt / .md など UTF-8）のアップロードに対応しています。
     </p>
@@ -292,16 +292,18 @@ const handleFileUpload = async () => {
 
       {/* 入力フォーム全体 */}
       <form className="question-form" onSubmit={handleSubmit}>
-        <label className="question-label">
-          指示（質問）を入力してください：
-          <textarea
-            className="question-input"
-            value={input} // state input の値を反映
-            onChange={(e) => setInput(e.target.value)} // 入力のたびに state を更新
-            rows={4}
-            placeholder="例：このアプリの構成を要約して、改善案も教えて など"
-          />
-        </label>
+        <h2>
+            <label className="question-label">
+              指示（質問）を入力してください：
+           <textarea
+              className="question-input"
+              value={input} // state input の値を反映
+              onChange={(e) => setInput(e.target.value)} // 入力のたびに state を更新
+              rows={4}
+              placeholder="例：このアプリの構成を要約して、改善案も教えて など"
+            />
+          </label>
+        </h2>
 
         {/* 送信ボタン。ローディング中 or 空入力のときは disabled にする */}
         <button

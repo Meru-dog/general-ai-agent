@@ -29,8 +29,8 @@ class AgentState(BaseModel):
     input: str
     intent: Optional[str] = None
     rag_result: Optional[List[Dict]] = None
+    web_search_result: Optional[List[Dict]] = None
     output: Optional[str] = None
-
     # ミュータブルなデフォルト値は default_factory を使う
     steps: List[StepLog] = Field(default_factory=list)
     chat_history: List[Dict[str, str]] = Field(default_factory=list)
