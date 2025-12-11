@@ -60,6 +60,11 @@ class DocumentRegisterRequest(BaseModel):
 # =========================
 # エージェント呼び出しAPI
 # =========================
+
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "general-ai-agent backend is running"}
+    
 @app.post("/api/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
