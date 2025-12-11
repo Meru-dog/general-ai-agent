@@ -1,5 +1,3 @@
-/* frontend/src/App.css */
-
 .app {
   max-width: 800px;
   margin: 0 auto;
@@ -78,4 +76,25 @@
 
 .reference-snippet {
   margin-top: 6px;
+}
+
+/* 文書登録セクション */
+.upload-section {
+  margin-bottom: 32px;
+  padding: 16px;
+  border-radius: 6px;
+  border: 1px solid #000000;
+  background-color: #7c8bff;
+}
+
+.upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.upload-message {
+  margin-top: 8px;
+  color: #006400;
 }

@@ -1,115 +1,135 @@
-# backend/app/main.py
-from fastapi import FastAPI
+from typing import List
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.agent.graph_builder import agent_executor
 from app.agent.types import StepLog
-from app.rag.index_builder import build_index   # ★ 追加
-from app.rag.retriever import RAGRetriever     # （ログ用などに使うなら）
+from app.rag.index_builder import build_index
+from app.rag.retriever import RAGRetriever
 from app import config
+import uuid
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],   # 必要に応じて絞り込んでOK
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-class AgentRequest(BaseModel):
-    input: str
 
-# ★ 起動時にインデックスの存在をチェックし、必要に応じて構築
+# =========================
+# 起動時イベントでインデックス確認
+# =========================
+
 @app.on_event("startup")
 def startup_event():
-    import os
-    import chromadb
-    from chromadb.utils import embedding_functions
-    
-    # 環境変数 BUILD_INDEX_ON_STARTUP が "true" の場合は強制的に構築
-    force_build = os.getenv("BUILD_INDEX_ON_STARTUP", "false").lower() == "true"
-    
-    if force_build:
-        try:
-            print("アプリケーション起動: インデックスを構築します（BUILD_INDEX_ON_STARTUP=true）...")
-            build_index()
-            print("インデックス構築完了。")
-            return
-        except Exception as e:
-            print(f"警告: インデックス構築に失敗しました（アプリは起動します）: {e}")
-            return
-    
-    # インデックスの存在をチェック
+    # 既存の build_index 呼び出しがあるならそれはそのまま or 好きなように
     try:
-        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-        openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=config.OPENAI_API_KEY,
-            model_name=config.EMBEDDING_MODEL,
-        )
-        collection = client.get_or_create_collection(
-            name=config.CHROMA_COLLECTION,
-            embedding_function=openai_ef,
-        )
-        count = collection.count()
-        
-        if count == 0:
-            # インデックスが空の場合、自動的に構築
-            print("アプリケーション起動: インデックスが空のため、自動的に構築します...")
-            try:
-                build_index()
-                print("インデックス構築完了。")
-            except Exception as e:
-                print(f"警告: インデックス構築に失敗しました（アプリは起動します）: {e}")
-        else:
-            print(f"アプリケーション起動: インデックス確認完了（{count}件のチャンクが登録されています）")
+        # ここは今の実装に合わせて必要ならコメントアウトでもOK
+        # build_index()
+        retriever = RAGRetriever()
+        count = retriever.collection.count()
+        print(f"アプリケーション起動: インデックス確認完了（{count}件のチャンクが登録されています）")
     except Exception as e:
-        # チェックに失敗した場合も構築を試みる
-        print(f"インデックスチェック中にエラーが発生しました: {e}")
-        print("インデックス構築を試みます...")
-        try:
-            build_index()
-            print("インデックス構築完了。")
-        except Exception as build_error:
-            print(f"警告: インデックス構築に失敗しました（アプリは起動します）: {build_error}")
+        print(f"警告: 起動時のインデックス確認に失敗しました: {e}")
 
 
-@app.post("/api/agent/ask")
-async def ask_agent(req: AgentRequest):
+# =========================
+# モデル定義
+# =========================
+
+class AskRequest(BaseModel):
+    input: str
+
+class AskResponse(BaseModel):
+    output: str
+    steps: List[StepLog]
+
+class DocumentRegisterRequest(BaseModel):
+    title: str
+    content: str
+
+# =========================
+# エージェント呼び出しAPI
+# =========================
+
+@app.post("/api/documents/register")
+async def register_document(payload: DocumentRegisterRequest):
+    """
+    ユーザーがアップロードした文書を RAG のインデックス（Chroma）に登録するエンドポイント
+    """
     try:
-        result = agent_executor.invoke({"input": req.input})
+        print(f"[API] /api/documents/register called. title={payload.title!r}")
 
-        raw_steps = result.get("steps", [])
-        steps_json = []
-        for s in raw_steps:
-            if isinstance(s, StepLog):
-                steps_json.append(
-                    {
-                        "step_id": s.step_id,
-                        "action": s.action,
-                        "content": s.content,
-                    }
-                )
-            else:
-                steps_json.append(
-                    {
-                        "step_id": None,
-                        "action": getattr(s, "action", None)
-                                   or getattr(s, "type", None)
-                                   or type(s).__name__,
-                        "content": str(s),
-                    }
-                )
+        retriever = RAGRetriever()
 
-        return JSONResponse(
-            content={
-                "output": result.get("output", ""),
-                "steps": steps_json,
-            }
+        # ユーザー文書用の一意な doc_id を生成
+        doc_id = "user_" + uuid.uuid4().hex
+
+        # RAGRetriever.add_document のシグネチャ:
+        # def add_document(self, doc_id, title, content, ...)
+        result = retriever.add_document(
+            doc_id=doc_id,
+            title=payload.title,
+            content=payload.content,
         )
+
+        print(f"[API] /api/documents/register finished. doc_id={doc_id}, result={result}")
+        return {
+            "message": "文書をRAGインデックスに登録しました。",
+            "title": payload.title,
+            "doc_id": doc_id,
+            "result": result,
+        }
+
+    except Exception as e:
+        import traceback
+        print(f"Error in /api/documents/register: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"文書登録中にエラーが発生しました: {e}",
+        )
+
+
+
+@app.post("/api/agent/ask", response_model=AskResponse)
+async def ask_agent(request: AskRequest):
+    """
+    フロントエンドからの質問を受け取り、LangGraph エージェントを実行して回答を返すエンドポイント
+    """
+    try:
+        # ここが必ず出るはずのログ
+        print(f"[API] /api/agent/ask called. input={request.input[:50]!r}")
+
+        # LangGraph に渡す初期 state
+        initial_state = {
+            "input": request.input,
+            "steps": [],         # StepLog のリスト
+            "intent": None,
+            "source": None,
+            "rag_result": [],
+            "chat_history": [],  # 将来用
+        }
+
+        # エージェント実行
+        result_state = agent_executor.invoke(initial_state)
+
+        output = result_state.get("output", "")
+        steps = result_state.get("steps", [])
+
+        print(
+            f"[API] /api/agent/ask finished. "
+            f"source={result_state.get('source')}, "
+            f"steps={len(steps)}"
+        )
+
+        return AskResponse(output=output, steps=steps)
 
     except Exception as e:
         import traceback
@@ -119,7 +139,7 @@ async def ask_agent(req: AgentRequest):
         return JSONResponse(
             content={
                 "error": str(e),
-                "message": "エージェントの実行中にエラーが発生しました。サーバーログを確認してください。"
+                "message": "エージェントの実行中にエラーが発生しました。サーバーログを確認してください。",
             },
             status_code=500,
         )

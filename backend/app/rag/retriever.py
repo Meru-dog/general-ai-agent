@@ -7,6 +7,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 
 from app import config
+from app.rag.index_builder import chunk_text
 
 
 class RAGRetriever:
@@ -59,11 +60,12 @@ class RAGRetriever:
         except Exception as e:
             raise RuntimeError(f"コレクションの取得に失敗しました: {e}")
 
-    def search(self, query: str, n_results: int = 3) -> List[Dict]:
+
+    def search(self, query: str, n_results: int = 10) -> List[Dict]:
         """
         類似検索を実行して結果を返す関数
         :param query: ユーザー質問
-        :param n_results: 取得上限（デフォルト 3）
+        :param n_results: 取得上限（デフォルト 10）
         :return: [{
             "document_id": "...",
             "document_title": "...",
@@ -72,35 +74,99 @@ class RAGRetriever:
         }, ...]
         """
         try:
-            # インデックスが空の場合は空のリストを返す
-            if self.collection.count() == 0:
+            collection_count = self.collection.count()
+            if collection_count == 0:
                 print("警告: インデックスが空のため、検索結果は0件です")
                 return []
-            
-            # Chromaの検索メソッド
+
+            # n_results はコレクションの件数を超えないようにしておく
+            n = min(n_results, collection_count)
+
+            # Chroma の検索メソッド
             results = self.collection.query(
                 query_texts=[query],
-                n_results=n_results
+                n_results=n,
             )
 
-            docs = []
-            # results["documents"] は 2次元配列 → [query_index][doc_index]
+            # デバッグログ
+            raw_docs = results.get("documents") or []
+            raw_count = len(raw_docs[0]) if raw_docs else 0
+            print(
+                f"[RAGRetriever.search] query={query!r}, "
+                f"n_results={n}, raw_result_count={raw_count}"
+            )
+
+            docs: List[Dict] = []
+
             if results.get("metadatas") and results.get("documents") and results.get("distances"):
                 for metadatas, docs_list, distances in zip(
                     results["metadatas"], results["documents"], results["distances"]
                 ):
                     for meta, doc, dist in zip(metadatas, docs_list, distances):
-                        docs.append({
-                            "document_id": meta.get("document_id") if meta else None,
-                            "document_title": meta.get("document_title") if meta else "（タイトル不明）",
-                            "snippet": doc if doc else "",
-                            "score": float(1.0 - dist) if dist is not None else 0.0,  # 類似度に変換
-                        })
+                        title = meta.get("document_title") if meta else "（タイトル不明）"
+                        docs.append(
+                            {
+                                "document_id": meta.get("document_id") if meta else None,
+                                "document_title": title,
+                                "snippet": doc or "",
+                                "score": float(1.0 - dist) if dist is not None else 0.0,
+                            }
+                        )
+
+            print(
+                "[RAGRetriever.search] hits="
+                f"{len(docs)}, titles={[d['document_title'] for d in docs]}"
+            )
 
             return docs
+
         except Exception as e:
             print(f"RAG検索中にエラーが発生しました: {e}")
             import traceback
             print(traceback.format_exc())
             # エラーが発生しても空のリストを返して処理を続行
             return []
+
+
+    def add_document(self, doc_id: str, title: str, content: str) -> int:
+        """
+        任意のテキスト文書をチャンク化してコレクションに追加する。
+        :param doc_id: 文書ID（ユニークであれば任意）
+        :param title: 文書タイトル（表示用）
+        :param content: 文書全体のテキスト内容
+        :return: 追加されたチャンク数
+        """
+        chunks = chunk_text(content)
+        ids: List[str] = []
+        documents: List[str] = []
+        metadatas: List[dict] = []
+
+        for idx, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}_chunk_{idx}"
+            ids.append(chunk_id)
+            documents.append(chunk)
+            metadatas.append(
+                {
+                    "document_id": doc_id,
+                    "document_title": title,
+                    "chunk_index": idx,
+                }
+            )
+
+        if not ids:
+            return 0
+
+        self.collection.add(
+            ids=ids,
+            documents=documents,
+            metadatas=metadatas,
+        )
+
+        # 追加後の総件数をログで確認できるように
+        new_count = self.collection.count()
+        print(
+            f"[RAGRetriever.add_document] doc_id={doc_id}, "
+            f"added_chunks={len(ids)}, total_chunks={new_count}"
+        )
+
+        return len(ids)

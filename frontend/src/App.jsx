@@ -7,10 +7,18 @@ import "./App.css";
 // バックエンドのエージェントAPIのURL
 // 環境変数 VITE_API_URL から取得（設定されていない場合はローカル開発用のデフォルト値を使用）
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/agent/ask";
+const DEFAULT_ASK_URL = "http://localhost:8000/api/agent/ask";
+const ASK_URL = import.meta.env.VITE_API_URL || DEFAULT_ASK_URL;
+
+// 一旦、ベースURLは「直書き」
+const UPLOAD_URL =
+  import.meta.env.VITE_UPLOAD_URL || "http://localhost:8000/api/documents/register";
 
 // デバッグ用：使用されているAPI URLをコンソールに出力（本番環境でも確認可能）
 console.log("API URL:", API_URL);
 console.log("Environment variable VITE_API_URL:", import.meta.env.VITE_API_URL);
+console.log("ASK_URL:", ASK_URL);
+console.log("UPLOAD_URL:", UPLOAD_URL);
 
 function App() {
   // ユーザーの入力（指示文）を保持する state
@@ -23,6 +31,14 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   // エラー発生時のメッセージ
   const [error, setError] = useState("");
+
+  // 文書登録用
+  const [docTitle, setDocTitle] = useState("");
+  const [docContent, setDocContent] = useState("");
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+
 
   // フォーム送信時（「送信」ボタン押下時）に呼ばれる関数
   const handleSubmit = async (e) => {
@@ -90,11 +106,96 @@ function App() {
     }
   };
 
+  const handleUploadDocument = async (e) => {
+    e.preventDefault();
+
+    if (!docTitle.trim() || !docContent.trim()) {
+      setUploadError("タイトルと文書内容の両方を入力してください。");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError("");
+    setUploadMessage("");
+
+    try {
+      const res = await fetch(UPLOAD_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: docTitle,
+          content: docContent,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`サーバーエラー: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setUploadMessage(
+        data.message ||
+          `文書を登録しました（document_id: ${data.document_id}, chunks: ${data.chunks}）`
+      );
+      // 成功したら内容を残してもいいし、クリアしてもいい
+      // ここではタイトルだけ残して本文はクリアしておく
+      // setDocContent("");
+    } catch (err) {
+      console.error("文書登録APIエラー:", err);
+      setUploadError(`文書の登録に失敗しました: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   // JSX（画面の見た目）を返す
   return (
     <div className="app">
       {/* アプリのタイトル */}
       <h1 className="app-title">汎用タスク実行AIエージェント</h1>
+
+      {/* 文書登録セクション */}
+      <section className="upload-section">
+        <h2>文書登録（RAG対象にする文書）</h2>
+        <form className="upload-form" onSubmit={handleUploadDocument}>
+          <label className="question-label">
+            文書タイトル：
+            <input
+              className="question-input"
+              type="text"
+              value={docTitle}
+              onChange={(e) => setDocTitle(e.target.value)}
+              placeholder="例：業務委託契約書（A社との契約）"
+            />
+          </label>
+
+          <label className="question-label">
+            文書内容（全文をコピペ）：
+            <textarea
+              className="question-input"
+              rows={6}
+              value={docContent}
+              onChange={(e) => setDocContent(e.target.value)}
+              placeholder="契約書などの本文をここに貼り付けてください。"
+            />
+          </label>
+
+          <button
+            className="submit-button"
+            type="submit"
+            disabled={isUploading || !docTitle.trim() || !docContent.trim()}
+          >
+            {isUploading ? "文書を登録中..." : "文書を登録"}
+          </button>
+        </form>
+
+        {uploadError && <div className="error-message">{uploadError}</div>}
+        {uploadMessage && (
+          <div className="upload-message">{uploadMessage}</div>
+        )}
+      </section>
 
       {/* 入力フォーム全体 */}
       <form className="question-form" onSubmit={handleSubmit}>

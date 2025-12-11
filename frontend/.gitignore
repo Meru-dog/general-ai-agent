@@ -25,4 +25,5 @@ dist-ssr
 __pycache__/
 *.pyc
 
+frontend/.env.development.local
 
