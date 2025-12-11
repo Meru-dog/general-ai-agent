@@ -1,5 +1,8 @@
+import io
+from pypdf import PdfReader
+from docx import Document
 from typing import List
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -57,6 +60,118 @@ class DocumentRegisterRequest(BaseModel):
 # =========================
 # エージェント呼び出しAPI
 # =========================
+@app.post("/api/documents/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+):
+    """
+    ファイルアップロード → テキスト抽出 → RAGインデックスに登録
+    対応形式:
+      - .txt / .md / .markdown / .json （UTF-8テキスト）
+      - .pdf （テキスト埋め込み型のPDF）
+      - .docx （Wordファイル）
+    """
+    try:
+        print(f"[API] /api/documents/upload called. filename={file.filename!r}, title={title!r}")
+
+        filename = file.filename or "uploaded_document"
+        ext = ""
+        if "." in filename:
+            ext = filename.rsplit(".", 1)[-1].lower()
+
+        final_title = title or filename
+
+        # ファイル内容をバイト列で読み込み
+        raw_bytes = await file.read()
+
+        # 拡張子ごとにテキスト抽出
+        if ext in {"txt", "md", "markdown", "json"}:
+            # プレーンテキスト（UTF-8前提）
+            try:
+                content = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="テキストファイルをUTF-8として読み取れませんでした。",
+                )
+
+        elif ext == "pdf":
+            # PDF（テキスト埋め込み型）を読み取る
+            try:
+                pdf_stream = io.BytesIO(raw_bytes)
+                reader = PdfReader(pdf_stream)
+                texts: list[str] = []
+                for i, page in enumerate(reader.pages):
+                    page_text = page.extract_text() or ""
+                    texts.append(page_text)
+                content = "\n\n".join(texts).strip()
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"PDFファイルの読み取りに失敗しました: {e}",
+                )
+            if not content:
+                raise HTTPException(
+                    status_code=400,
+                    detail="PDFからテキストを抽出できませんでした。（画像のみのPDFの可能性があります）",
+                )
+
+        elif ext == "docx":
+            # Word(.docx) を読み取る
+            try:
+                doc_stream = io.BytesIO(raw_bytes)
+                doc = Document(doc_stream)
+                paragraphs: list[str] = [p.text for p in doc.paragraphs if p.text]
+                content = "\n".join(paragraphs).strip()
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Wordファイル(.docx)の読み取りに失敗しました: {e}",
+                )
+            if not content:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Wordファイルからテキストを抽出できませんでした。",
+                )
+
+        else:
+            # 未対応形式
+            raise HTTPException(
+                status_code=400,
+                detail=f"未対応のファイル形式です: .{ext or '不明'}（txt/pdf/docx などを利用してください）",
+            )
+
+        # ここまでで content にテキストが入っている前提
+        retriever = RAGRetriever()
+        doc_id = "user_" + uuid.uuid4().hex
+
+        result = retriever.add_document(
+            doc_id=doc_id,
+            title=final_title,
+            content=content,
+        )
+
+        print(f"[API] /api/documents/upload finished. doc_id={doc_id}, title={final_title!r}")
+        return {
+            "message": "アップロードしたファイルをRAGインデックスに登録しました。",
+            "title": final_title,
+            "doc_id": doc_id,
+            "result": result,
+        }
+
+    except HTTPException:
+        # HTTPException はそのまま伝播
+        raise
+    except Exception as e:
+        import traceback
+        print(f"Error in /api/documents/upload: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"ファイルアップロード中に予期せぬエラーが発生しました: {e}",
+        )
+
 
 @app.post("/api/documents/register")
 async def register_document(payload: DocumentRegisterRequest):

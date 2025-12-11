@@ -5,3 +5,6 @@ chromadb
 python-dotenv
 langgraph
 langchain-openai
+python-multipart
+pypdf
+python-docx

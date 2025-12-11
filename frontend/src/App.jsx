@@ -9,6 +9,9 @@ import "./App.css";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/agent/ask";
 const DEFAULT_ASK_URL = "http://localhost:8000/api/agent/ask";
 const ASK_URL = import.meta.env.VITE_API_URL || DEFAULT_ASK_URL;
+const API_BASE_URL = API_URL.replace(/\/api\/agent\/ask$/, "");
+const DOC_REGISTER_URL = `${API_BASE_URL}/api/documents/register`;
+const DOC_UPLOAD_URL = `${API_BASE_URL}/api/documents/upload`;
 
 // 一旦、ベースURLは「直書き」
 const UPLOAD_URL =
@@ -19,6 +22,7 @@ console.log("API URL:", API_URL);
 console.log("Environment variable VITE_API_URL:", import.meta.env.VITE_API_URL);
 console.log("ASK_URL:", ASK_URL);
 console.log("UPLOAD_URL:", UPLOAD_URL);
+console.log("API_BASE_URL:", API_BASE_URL);
 
 function App() {
   // ユーザーの入力（指示文）を保持する state
@@ -38,6 +42,11 @@ function App() {
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadError, setUploadError] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+
+  // ファイルアップロード用
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileUploadMessage, setFileUploadMessage] = useState("");
+
 
 
   // フォーム送信時（「送信」ボタン押下時）に呼ばれる関数
@@ -150,6 +159,64 @@ function App() {
     }
   };
 
+  // ファイル選択時の処理
+const handleFileChange = (event) => {
+  const file = event.target.files?.[0] || null;
+  setSelectedFile(file);
+  setFileUploadMessage("");
+  if (!file) return;
+
+  console.log("選択されたファイル:", file.name, file.type, file.size);
+};
+
+// ファイルアップロードボタン押下時の処理
+const handleFileUpload = async () => {
+  if (!selectedFile) {
+    setError("アップロードするファイルを選択してください。");
+    return;
+  }
+
+  try {
+    setError("");
+    setFileUploadMessage("アップロード中です...");
+    console.log("ファイルアップロード開始:", selectedFile.name);
+
+    const formData = new FormData();
+    // FastAPI 側の UploadFile = File(...) と対応
+    formData.append("file", selectedFile);
+    // タイトルをフォームから渡したければここで
+    formData.append("title", docTitle || selectedFile.name);
+
+    const response = await fetch(DOC_UPLOAD_URL, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      console.error("ファイルアップロード失敗:", errorData || response.statusText);
+      setError(
+        `ファイルアップロードに失敗しました: ${
+          errorData?.detail || response.statusText
+        }`
+      );
+      setFileUploadMessage("");
+      return;
+    }
+
+    const data = await response.json();
+    console.log("ファイルアップロード成功:", data);
+    setFileUploadMessage(
+      `ファイル「${data.title}」をRAGインデックスに登録しました。`
+    );
+  } catch (err) {
+    console.error("ファイルアップロード中にエラー:", err);
+    setError(`ファイルアップロード中にエラーが発生しました: ${err}`);
+    setFileUploadMessage("");
+  }
+};
+
+
   // JSX（画面の見た目）を返す
   return (
     <div className="app">
@@ -196,6 +263,32 @@ function App() {
           <div className="upload-message">{uploadMessage}</div>
         )}
       </section>
+
+      <hr />
+
+  {/* 新規: ファイルアップロード */}
+  <div className="file-upload-block">
+    <h3>ファイルから登録</h3>
+    <p className="help-text">
+      現在はテキストファイル（.txt / .md など UTF-8）のアップロードに対応しています。
+    </p>
+
+    <div className="file-upload-row">
+      <input
+      type="file"
+      accept=".txt,.md,.markdown,.json,.pdf,.docx"
+      onChange={handleFileChange}
+    />
+
+      <button type="button" onClick={handleFileUpload}>
+        ファイルをアップロードして登録
+      </button>
+    </div>
+
+    {fileUploadMessage && (
+      <p className="info-message">{fileUploadMessage}</p>
+    )}
+  </div>
 
       {/* 入力フォーム全体 */}
       <form className="question-form" onSubmit={handleSubmit}>
