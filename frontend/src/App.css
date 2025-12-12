@@ -374,3 +374,57 @@
 .danger-button:hover {
   background-color: #f87171;
 }
+
+/* 会話履歴＆回答の Markdown 表示用 */
+.chat-content {
+  margin-top: 0.25rem;
+}
+
+/* 段落 */
+.chat-content p,
+.answer-text p {
+  margin: 0.25rem 0;
+}
+
+/* 見出し */
+.chat-content h1,
+.chat-content h2,
+.chat-content h3,
+.answer-text h1,
+.answer-text h2,
+.answer-text h3 {
+  margin: 0.5rem 0 0.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* 箇条書き */
+.chat-content ul,
+.chat-content ol,
+.answer-text ul,
+.answer-text ol {
+  margin: 0.25rem 0 0.25rem 1.5rem;
+  padding-left: 1rem;
+}
+
+/* インラインコード */
+.chat-content code,
+.answer-text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9em;
+  background: #f3f4f6;
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+}
+
+/* コードブロック */
+.chat-content pre code,
+.answer-text pre code {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: #111827;
+  color: #e5e7eb;
+  overflow-x: auto;
+}

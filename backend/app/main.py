@@ -52,9 +52,14 @@ def startup_event():
 # モデル定義
 # =========================
 
+class Message(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
 class AskRequest(BaseModel):
     input: str
-
+    history: List[Message] | None = None
+    
 
 class AskResponse(BaseModel):
     output: str
@@ -304,17 +309,24 @@ async def ask_agent(request: AskRequest):
     try:
         print(f"[API] /api/agent/ask called. input={request.input[:50]!r}")
 
+        # history が来ていればそれを使う（なければ空リスト）
+        history_list = []
+        if request.history:
+            history_list = [
+                {"role": m.role, "content": m.content}
+                for m in request.history
+            ]
+
         # LangGraph に渡す初期 state
         initial_state = {
             "input": request.input,
-            "steps": [],         # StepLog のリスト
+            "steps": [],
             "intent": None,
             "source": None,
             "rag_result": [],
-            "chat_history": [],  # 将来用
+            "chat_history": history_list,
         }
 
-        # エージェント実行
         result_state = agent_executor.invoke(initial_state)
 
         output = result_state.get("output", "")
