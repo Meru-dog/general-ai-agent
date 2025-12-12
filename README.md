@@ -1,110 +1,95 @@
 # 汎用タスク実行 AI エージェント（General AI Agent）
 
-ブラウザから自然言語で指示すると、
+ユーザーが自然言語で指示すると、エージェントが
 
-- 手元の文書（契約書など）をもとにした **RAG 検索**
-- 外部 Web を使った **Web 検索（Tavily）**
-- それらを使わない **LLM 単体の一般回答**
+* 「手元文書に依存する質問か？」
+* 「一般知識＋Web検索で足りるか？」
 
-を自動で組み合わせて回答する **エージェント型 Web アプリケーション** です。
+を自動判定し、
 
-単なる「チャットボット」ではなく、
+* 文書依存 → RAG（手元文書＋ベクトル検索）で回答
+* 非文書依存 → LLM単体、または LLM＋Web検索 で回答
 
-- 文書アップロード＆インデックス構築
-- 文書一覧・削除
-- Web 検索と RAG の併用
-- エージェントのステップログ表示
+を行う **エージェント型 Web アプリケーション** です。
 
-までを一通り備えた「汎用タスク実行エージェント」の最小構成を目指しています。
+さらに、セッション内の **会話履歴（簡易メモリ）** を保持し、
+「さっきの NDA の続きなんだけど…」といった対話も可能です。
 
 ---
 
 ## 1. 特徴
 
-### 🧠 意図解析（Intent Routing）
+### 🧠 意図解析（ドキュメント依存かの判定）
 
-入力された質問から、エージェントがざっくりと以下を判定します。
+* ユーザーの質問文をもとに
+  「手元文書を読む必要があるか」／「一般的な知識で足りるか」
+  を LangGraph のノードで判定します。
+* 「契約書の○条を要約して」「この雇用契約の成果物の権利帰属は？」
+  → 文書依存と判定
+* 「NDA の一般的な条項構成を教えて」「RAG って何？」
+  → 非文書依存と判定
 
-- 手元の文書に依拠すべきか（`doc_dependent`）
-- Web で最新情報を取りに行くべきか（`web_required`）
-- 通常の一般知識だけで足りるか（`llm_only`）
-- その組み合わせ（例：doc + Web）
+### 📄 RAG 連携（手元文書ベースの回答）
 
-この判定結果に応じて、RAG / Web / LLM を柔軟に使い分けます。
+* 文書依存と判定された場合のみ、RAG を実行
+* Chroma＋OpenAI Embedding によるベクトル検索で関連チャンクを取得
+* 関連チャンクを LLM のコンテキストに渡して回答生成
+* 文書には以下のようなものを想定
 
----
+  * NDA（秘密保持契約書）
+  * 業務委託契約書
+  * 雇用契約書
+  * 売買・代理店契約 等
 
-### 📄 文書登録 & RAG 連携
+### 📥 文書登録機能（テキスト／ファイル）
 
-RAG 対象の文書は、以下の 2 通りの方法で登録できます。
+RAG 対象の文書は Web UI から簡単に登録できます。
 
-1. **画面上にコピペして登録**
+* **テキスト貼り付け**
 
-   - タイトルと本文（全文）を入力 → `/api/documents/register` でインデックスに登録
-   - NDA / 業務委託契約 / 雇用契約 など、テキストベースの契約書を想定
+  * タイトル＋本文をフォームに直接コピペして登録
+* **ファイルアップロード**
 
-2. **ファイルをアップロードして登録**
+  * `.txt` / `.md` / `.markdown` / `.json`（UTF-8 テキスト）
+  * `.pdf`（テキスト埋め込み型）
+  * `.docx`（Word）
+* 登録された文書は
 
-   対応形式：
+  * 一覧（タイトル・document_id・チャンク数）
+  * 削除（document_id 単位で削除）
+    が可能です。
 
-   - `.txt` / `.md` / `.markdown` / `.json`（UTF-8 テキスト）
-   - `.pdf`（テキスト埋め込み型）
-   - `.docx`（Word ファイル）
+### 🌐 Web 検索（Tavily）
 
-   → `/api/documents/upload` 経由でテキスト抽出 → Chroma にチャンクとして保存され、RAG で検索可能になります。
+* 「一般的な情報だが、最新の情報も見た方がよい」ケースでは
+  Tavily API を通じて Web 検索を実行
+* LangGraph のツールとして Web 検索ノードを追加し、
+  RAG結果＋Web結果＋LLM 一般知識を組み合わせて回答を生成
 
-登録された文書は、Chroma ベースのベクターストアにチャンク分割・埋め込みされ、
-LangGraph の RAG ノードから検索されます。
+### 💬 会話履歴（セッションメモリ）
 
----
-
-### 📚 文書一覧・削除
-
-登録済み文書は UI から一覧表示できます。
-
-- タイトル
-- document_id
-- チャンク数
-
-不要になった文書は、**document_id 単位で一括削除**できます。
-
----
-
-### 🌐 Web 検索連携（Tavily）
-
-Web 参照が必要と判断された質問に対しては、Tavily API を使って検索し、  
-取得した外部コンテキスト（検索結果サマリ）も LLM に渡します。
-
-- ニュース・相場・法改正など、**手元文書には存在しない最新情報**を補完する用途を想定
-- RAG と Web の両方が有効な場合は、**手元文書の情報を優先しつつ、外部情報を参考として付加**するプロンプト設計にしています。
-
----
+* フロント側で `user` / `assistant` の会話履歴を保持し、
+  `/api/agent/ask` に `history` として送信
+* バックエンドでは `chat_history` として LangGraph に渡し、
+  プロンプト内で「直近最大5ターンの会話」を参照
+* 「さっきの NDA の定義条項に関連して〜」といった
+  **コンテキストを踏まえた回答**が可能
 
 ### 🧾 思考ログの可視化
 
-エージェントの各ステップ（例）：
+* エージェントのステップを「実行ログ」として表示
 
-- `analysis` : 質問意図解析（文書依存か / Web 必要か / LLM のみか）
-- `rag`      : RAG 実行＆ヒット件数のログ
-- `web`      : Web 検索実行＆簡易サマリ
-- `answer`   : 最終回答生成
+  * Step 1: 質問意図解析（analysis）
+  * Step 2: RAG 実行 or スキップ（rag）
+  * Step 3: Web検索（必要な場合のみ）
+  * Step 4: 回答生成（answer）
+* どのルートで回答が生成されたかが一目で分かります。
 
-を、フロント側の「実行ログ」エリアにリスト表示します。
+### 🌐 Web アプリとしてブラウザだけで利用可能
 
----
-
-### 💻 Web アプリとして利用可能
-
-- フロントエンド：React（Vite）
-- バックエンド：FastAPI + LangGraph
-
-ブラウザからアクセスするだけで、
-
-1. 文書登録（コピペ / ファイル）
-2. 質問入力
-3. 回答＋実行ログ確認
-
-まで完結します。
+* フロントエンドは React（Vite）
+* バックエンドは FastAPI + LangGraph
+* Render / Vercel 等のホスティングにそのまま載せられる構成
 
 ---
 
@@ -113,31 +98,27 @@ Web 参照が必要と判断された質問に対しては、Tavily API を使�
 ```text
 User (Browser)
    ↓
-React Frontend
-   ├─ 文書登録（POST /api/documents/register）
-   ├─ ファイルアップロード（POST /api/documents/upload）
-   ├─ 文書一覧取得（GET /api/documents）
-   ├─ 文書削除（DELETE /api/documents/{document_id}）
-   └─ 質問送信（POST /api/agent/ask）
-
+React Frontend (Vite)
+   ↓  POST /api/agent/ask  (JSON: { input, history[] })
 FastAPI Backend
    ↓
 LangGraph エージェント
    ├─ ノード1: 質問意図解析 (analysis)
-   │      └─ doc_dependent / web_required / llm_only / both を判定
-   ├─ ノード2: RAG 実行 (rag)
-   │      └─ Chroma（documents コレクション）からベクトル検索
-   ├─ ノード3: Web 検索 (web)
-   │      └─ Tavily API で外部 Web 情報を取得
-   └─ ノード4: 回答生成 (answer)
-          └─ OpenAI Chat モデルに
-              「質問 + 会話履歴 + RAG結果 + Web結果」を渡して回答生成
-
+   ├─ ノード2: ツールルーター (tool_router)
+   │    ├─ 文書依存 → RAG ノードへ
+   │    ├─ 非文書依存＋要Web情報 → Web検索ノードへ
+   │    └─ 非文書依存のみ → そのまま回答生成へ
+   ├─ ノード3: RAG 実行 (rag)
+   │    └─ Chroma (RAGRetriever) で類似チャンク取得
+   ├─ ノード4: Web検索 (web_search) ※Tavily
+   └─ ノード5: 回答生成 (answer)
+        └─ OpenAI Chat モデル
+             + RAG結果
+             + Web検索結果
+             + 会話履歴（直近数ターン）
+   ↓
 応答 JSON: { output, steps[] } をフロントに返却
 ```
-
-RAG に使うベクターストアには **Chroma** を採用しており、
-インデックス再構築用のスクリプト `app/rag/build_index.py` も用意しています。
 
 ---
 
@@ -148,230 +129,76 @@ RAG に使うベクターストアには **Chroma** を採用しており、
 * Python 3.11+
 * FastAPI
 * LangGraph
-* Chroma
-* OpenAI API（Chat + Embedding）
-* Tavily Web Search API
-* pypdf（PDF テキスト抽出）
-* python-docx（Word ファイルテキスト抽出）
+* OpenAI API（Chat, Embedding）
+* Chroma (ベクトルDB)
+* Tavily API（Web検索）
+* pypdf / python-docx（PDF, Word テキスト抽出用）
 
 ### Frontend
 
 * React
 * Vite
+* react-markdown（Markdown 表示用）
 
-### Infra（一例）
+### Infra（例）
 
 * Backend: Render
 * Frontend: Vercel
 
 ---
 
-## 4. 画面イメージ（概要）
+## 4. 公開版アプリの使い方（利用者向け）
 
-メインの画面には、以下のブロックがあります。
+※ 実際の URL に置き換えてください。
 
-1. **文書登録（テキスト貼り付け）**
+1. フロントエンド URL を開く
+   例：`https://<YOUR_FRONTEND_URL>`
 
-   * 文書タイトル
-   * 文書内容（全文）
-   * クリアボタン
-   * 登録ボタン
+2. 必要に応じて RAG 用の文書を登録する
 
-2. **ファイルから登録**
+   * 「文書登録（RAG対象にする文書）」セクションで、
 
-   * ファイル入力（`.txt` / `.md` / `.pdf` / `.docx` 等）
-   * アップロードして登録ボタン
+     * テキスト貼り付け
+     * ファイルアップロード（txt / pdf / docx 等）
+   * 「登録済み文書」で文書一覧・削除が可能
 
-3. **登録済み文書一覧**
+3. 「指示（質問） / 会話」セクションで指示を入力
 
-   * タイトル / document_id / チャンク数
-   * 削除ボタン
-   * 再読み込みボタン
+   * 例1（一般質問）
+     「NDA の一般的な条文構成を教えて」
+   * 例2（文書依存質問）
+     「この業務委託契約書の成果物条項を要約して」
+   * 例3（会話継続）
+     「さっきの秘密保持条項と競業避止条項の関係を整理して」
 
-4. **指示（質問）フォーム**
+4. 「送信」をクリックすると：
 
-   * テキストエリア
-   * 送信ボタン
-
-5. **回答表示エリア**
-
-   * LLM からの最終回答を表示
-
-6. **実行ログ**
-
-   * LangGraph の各ステップを順に表示
+   * 「回答」欄に LLM の回答が表示
+   * 「会話履歴」にユーザー／エージェントの発話が蓄積
+   * 「実行ログ」に analysis / rag / web_search / answer のステップが表示される
 
 ---
 
-## 5. 利用方法（エンドユーザー向け）
-
-### 5.1 文書を登録する（コピペ）
-
-1. 「文書登録（RAG 対象にする文書）」セクションに移動
-2. 「文書タイトル」に任意のタイトル（例：`A社 NDA`）を入力
-3. 「文書内容（全文をコピペ）」に契約書などの全文を貼り付け
-4. 「文書を登録」ボタンをクリック
-
-登録に成功すると、メッセージが表示され、
-「登録済み文書」一覧にも行が追加されます。
-
----
-
-### 5.2 ファイルから登録する
-
-1. 「ファイルから登録」セクションに移動
-2. アップロードしたいファイルを選択（例：`BusinessAgencyAgreement.txt`）
-3. 「ファイルをアップロードして登録」をクリック
-
-対応形式：
-
-* `.txt` / `.md` / `.markdown` / `.json`（UTF-8 テキスト）
-* `.pdf`（テキスト埋め込み型）
-* `.docx`（Word）
-
-アップロード後、自動的にテキスト抽出 → RAG インデックス登録まで行われます。
-
----
-
-### 5.3 文書一覧を確認・削除する
-
-1. 「登録済み文書」セクションで一覧を確認
-2. 不要な文書があれば、行右端の「削除」ボタンをクリック
-3. 確認ダイアログで OK を押すと、document_id に紐づくチャンクがすべて削除されます。
-
----
-
-### 5.4 質問してみる
-
-1. 「指示（質問）」セクションで質問を入力
-
-   * 例1（文書依存）：
-     「この契約書の成果物の権利帰属を要約して」
-   * 例2（文書＋Web）：
-     「この NDA の内容を踏まえつつ、最近の判例動向も加味してポイントを教えて」
-   * 例3（Web メイン）：
-     「最近の生成 AI に関する日本の法制度の議論状況を教えて」
-   * 例4（一般質問）：
-     「このアプリは何をするもの？」
-
-2. 「送信」ボタンを押すと、
-
-   * 上部に「回答」が表示
-   * 下部に「実行ログ（analysis / rag / web / answer）」が表示されます。
-
----
-
-## 6. API エンドポイント（開発者向け）
-
-### 6.1 エージェント実行
-
-* `POST /api/agent/ask`
-
-```json
-// request
-{
-  "input": "この契約書の成果物の権利帰属を要約して"
-}
-
-// response（例）
-{
-  "output": "…LLMの回答テキスト…",
-  "steps": [
-    {
-      "step_id": 1,
-      "action": "analysis",
-      "content": "質問意図解析: 文書依存と判断..."
-    },
-    {
-      "step_id": 2,
-      "action": "rag",
-      "content": "RAG実行: 3件ヒット..."
-    },
-    {
-      "step_id": 3,
-      "action": "web",
-      "content": "Web検索実行: ... "
-    },
-    {
-      "step_id": 4,
-      "action": "answer",
-      "content": "RAG結果とWeb結果を踏まえて回答を生成しました。"
-    }
-  ]
-}
-```
-
----
-
-### 6.2 文書登録（テキスト）
-
-* `POST /api/documents/register`
-
-```json
-// request
-{
-  "title": "雇用契約書",
-  "content": "（契約書本文全文）"
-}
-```
-
-レスポンスには `doc_id` やチャンク数などが含まれます。
-
----
-
-### 6.3 ファイルアップロード
-
-* `POST /api/documents/upload`（multipart/form-data）
-
-フィールド：
-
-* `file`: アップロードするファイル
-* `title`（任意）: UI 上に表示する文書タイトル（未指定ならファイル名）
-
----
-
-### 6.4 文書一覧・削除
-
-* `GET /api/documents`
-
-```json
-{
-  "documents": [
-    {
-      "document_id": "user_xxx",
-      "document_title": "BusinessAgencyAgreement.txt",
-      "chunk_count": 7
-    }
-  ]
-}
-```
-
-* `DELETE /api/documents/{document_id}`
-
-指定した document_id に紐づくチャンクをすべて削除します。
-
----
-
-## 7. リポジトリ構成（例）
+## 5. リポジトリ構成（例）
 
 ```text
 general-ai-agent/
 ├─ backend/
 │  ├─ app/
-│  │  ├─ main.py              # FastAPI エントリポイント
+│  │  ├─ main.py              # FastAPI エントリポイント（API群）
 │  │  ├─ config.py            # モデル名・パスなどの設定
 │  │  ├─ agent/
 │  │  │  ├─ graph_builder.py  # LangGraph グラフ定義
-│  │  │  ├─ nodes.py          # analysis / rag / web / answer ノード実装
+│  │  │  ├─ nodes.py          # analysis / rag / web_search / answer ノード
 │  │  │  └─ types.py          # AgentState / StepLog など
 │  │  └─ rag/
 │  │     ├─ document_loader.py
-│  │     ├─ index_builder.py  # 既存文書のインデックス構築ロジック
-│  │     ├─ build_index.py    # 起動時などに使うスクリプトエントリ
-│  │     └─ retriever.py      # Chroma への add/query/list/delete を担当
+│  │     ├─ index_builder.py
+│  │     ├─ retriever.py      # RAGRetriever（Chromaラッパー）
+│  │     └─ build_index.py    # 起動前に RAG インデックス構築するスクリプト
 │  ├─ documents/              # 初期 RAG 対象の文書 (.txt 等)
 │  ├─ requirements.txt
-│  └─ .env                    # OpenAI/Tavily キーなど（Git 管理外）
+│  └─ .env                    # OpenAI/Tavily キー等（Git 管理外）
 └─ frontend/
    ├─ index.html
    ├─ package.json
@@ -385,35 +212,36 @@ general-ai-agent/
 
 ---
 
-## 8. セットアップ（ローカル開発）
+## 6. 開発者向けセットアップ
 
-### 8.1 Backend
+### 6.1 バックエンド
 
 ```bash
 cd backend
 
 python -m venv .venv
-source .venv/bin/activate  # Windows は .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
 ```
 
-`.env` を作成（例）：
+`.env` を作成（`backend/.env`）：
 
 ```bash
-# backend/.env
 OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxx"
-OPENAI_LLM_MODEL="gpt-4.1-mini"
 OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
-
-TAVILY_API_KEY="tvly-xxxxxxxxxxxxxxxx"
+OPENAI_LLM_MODEL="gpt-4.1-mini"
 
 CHROMA_DIR="./app/chroma_db"
 CHROMA_COLLECTION="documents"
 DOCUMENTS_DIR="./app/documents"
+
+TAVILY_API_KEY="tvly-xxxxxxxxxxxxxxxxxxxxx"
+TAVILY_MAX_RESULTS="5"             # 任意（検索件数）
+TAVILY_SEARCH_DEPTH="basic"        # or "advanced"
 ```
 
-#### （任意）初期インデックス構築
+#### RAG インデックス構築
 
 ```bash
 cd backend
@@ -425,76 +253,126 @@ python -m app.rag.build_index
 ```bash
 cd backend
 uvicorn app.main:app --reload
+# => http://127.0.0.1:8000/docs で OpenAPI UI が確認可能
 ```
 
 ---
 
-### 8.2 Frontend
+### 6.2 フロントエンド
 
 ```bash
 cd frontend
 npm install
 ```
 
-`.env` または `.env.local` などで API URL を指定：
+`frontend/.env`（または `.env.local`）などで API URL を設定：
 
 ```bash
-# frontend/.env.local
 VITE_API_URL="http://localhost:8000/api/agent/ask"
+# 本番環境例: "https://<YOUR_BACKEND_URL>/api/agent/ask"
 ```
 
 ローカル開発サーバー起動：
 
 ```bash
 npm run dev
+# => 通常 http://localhost:5173/ で起動
 ```
 
-ブラウザから `http://localhost:5173/` にアクセスして動作確認します。
+ブラウザでアクセスして動作確認を行います。
 
 ---
 
-## 9. デプロイ（概要）
+## 7. RAG 用文書の登録方法
 
-### Backend（例：Render）
+### 7.1 テキスト貼り付けで登録
 
-* Root Directory：`backend`
+1. 「文書登録（RAG対象にする文書）」→「テキスト貼り付け」
+2. タイトルを入力（例：`A社 NDA`）
+3. 文書全文をテキストエリアに貼り付け
+4. 「文書を登録」をクリック
+5. 正常に登録されると、登録済み文書一覧に `document_id` と `チャンク数` が表示される
 
-* Build Command：`pip install -r backend/requirements.txt`
+### 7.2 ファイルから登録
 
-* Start Command（一例）：
+1. 「ファイルから登録」セクションでファイルを選択
+2. 対応ファイル形式：
 
-  ```bash
-  cd backend && python -m app.rag.build_index && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   * `.txt` / `.md` / `.markdown` / `.json`（UTF-8）
+   * `.pdf`（テキスト埋め込み型）
+   * `.docx`
+3. 「ファイルをアップロードして登録」をクリック
+4. 成功すると、ファイル名（または指定タイトル）で RAG インデックスに登録される
+
+### 7.3 文書の削除
+
+* 「登録済み文書」テーブルから対象行の「削除」ボタンをクリック
+* バックエンドの Chroma 上からも該当 `document_id` に紐づくチャンクが削除されます
+
+---
+
+## 8. Web検索の利用イメージ
+
+* 「一般知識＋インターネット上の情報」が必要な質問例：
+
+  * 「最新の日本の金利状況を踏まえた一般的なコメントをして」
+  * 「NDA の実務上の運用例を、最近のトレンドも含めて教えて」
+
+* エージェントの内部動作：
+
+  1. 質問意図解析で「Web検索が有用」と判断
+  2. Tavily API を呼んで関連情報を取得
+  3. RAG結果（あれば）＋Web結果＋一般知識をまとめて LLM に渡し回答生成
+
+---
+
+## 9. 会話履歴（セッションメモリ）の扱い
+
+* フロントエンドでは `messages` ステートとして会話履歴を保持
+
+  ```ts
+  type Message = { role: "user" | "assistant"; content: string };
   ```
 
-* 環境変数に `.env` と同等の値（OpenAI / Tavily / Chroma 等）を設定
+* `/api/agent/ask` へのリクエストボディ例：
 
-### Frontend（例：Vercel）
+  ```json
+  {
+    "input": "さっきの NDA の定義条項に関連して質問です…",
+    "history": [
+      { "role": "user", "content": "NDA 契約について条文を教えてください。" },
+      { "role": "assistant", "content": "..." }
+    ]
+  }
+  ```
 
-* Framework Preset：Vite
-* Build Command：`npm run build`
-* Output Directory：`dist`
-* 環境変数 `VITE_API_URL` を本番バックエンド URL に設定
+* バックエンドでは `chat_history` として LangGraph に渡し、
+  `generate_answer` ノードで直近数ターンをプロンプトに埋め込みます。
+
+* フロント側からは「会話履歴をクリア」ボタンで
+  `messages` を空にリセットすることも可能です。
 
 ---
 
 ## 10. 典型的なユースケース
 
-* 自分の契約書・テンプレート集を `documents/` と Web UI に登録しておき、
+* 自分の契約書・テンプレート集を `documents/` に入れ、
+  あるいは Web UI からアップロードした上で：
 
-  * 「この NDA の秘密保持義務の範囲を要約して」
+  * 「この NDA の目的条項を要約して」
   * 「業務委託契約における成果物の権利帰属について教えて」
-    などと聞くと、文書依存と判定された場合のみ RAG が走る
+  * 「さっきの雇用契約の秘密保持条項と職務著作の関係を整理して」
 
-* 逆に、
+  といった質問に、手元文書ベースで回答させる。
 
-  * 「最近の暗号資産規制の国際的な流れは？」
-    のような質問は Web 検索ベースで回答
+* 一方で、
 
-* LLM 単体でよい一般質問
+  * 「NDA の一般的な条項構成を教えて」
+  * 「RAG のメリットとデメリットを箇条書きで」
+  * 「Web検索も併用して、最近の動向を踏まえてコメントして」
 
-  * 「このアプリは何をするもの？」
-  * 「RAG とは何か、簡単に教えて」
+  のような質問は、一般 LLM 回答＋Web検索で処理し、
+  不必要に RAG を叩かないことでコストを抑制。
 
 ---
 
@@ -502,15 +380,24 @@ npm run dev
 
 ### 制約（現状）
 
-* Web 検索は Tavily に依存しており、対応範囲・言語は Tavily 側の仕様に準拠
-* 認証・ユーザー毎の文書分離は未実装（シングルユーザー前提）
-* 会話セッション単位の長期メモリは持たず、1 リクエストごとに完結
-* 文書アップロードサイズやページ数には実質的な上限（メモリ・応答時間）がある
+* セッション単位の簡易メモリのみで、長期記憶は未実装
+* ユーザー毎の認証・権限管理は未実装（ログイン前提ではない）
+* Web検索は Tavily に依存しており、API キーが必須
+* 画像のみの PDF などはテキスト抽出できない（pypdfベース）
 
 ### 今後の拡張アイデア
 
-* ユーザー認証と「ユーザー毎の文書空間」の分離
-* 会話セッション単位のメモリ保持（LangGraph の state 拡張）
-* ツール追加（計算、カレンダー、社内 API など）
-* 文書ビューワ・ヒット箇所ハイライト
-* より高度なルーティング（リスクスコアリングやツール優先度調整など）
+* ユーザー毎の永続メモリ（DB による会話履歴保存）
+* より高度なツール連携（計算・カレンダー・メール等）
+* 所内ナレッジベースとの安全な接続（権限管理込み）
+* 文書ごと／トピックごとのプロンプトテンプレート切り替え
+* LangGraph 上でのマルチエージェント構成（レビューエージェント等）
+
+---
+
+## 12. ライセンス
+
+## 12. ライセンス
+
+本リポジトリは MIT License のもとで公開されています。  
+詳細はリポジトリ直下の `LICENSE` ファイルを参照してください。
