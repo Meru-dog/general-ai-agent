@@ -127,6 +127,72 @@ class RAGRetriever:
             # エラーが発生しても空のリストを返して処理を続行
             return []
 
+    def list_documents(self) -> List[Dict]:
+        """
+        Chroma に入っているメタデータから、
+        document_id ごとに {document_id, document_title, chunk_count} を集計して返す。
+        """
+        try:
+            # メタデータだけ全件取得
+            data = self.collection.get(include=["metadatas"])
+            metadatas = data.get("metadatas", []) or []
+
+            docs_by_id: Dict[str, Dict] = {}
+
+            for meta in metadatas:
+                if not meta:
+                    continue
+
+                doc_id = meta.get("document_id")
+                if not doc_id:
+                    # 既存のNDAなど、document_idを持たないものがあればスキップ
+                    continue
+
+                title = meta.get("document_title") or "（タイトル不明）"
+
+                if doc_id not in docs_by_id:
+                    docs_by_id[doc_id] = {
+                        "document_id": doc_id,
+                        "document_title": title,
+                        "chunk_count": 0,
+                    }
+
+                docs_by_id[doc_id]["chunk_count"] += 1
+
+            return list(docs_by_id.values())
+
+        except Exception as e:
+            print(f"list_documents 中にエラーが発生しました: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return []
+
+    def delete_document(self, document_id: str) -> int:
+        """
+        document_id メタデータに紐づくすべてのチャンクを削除し、
+        削除したチャンク数を返す。
+        """
+        try:
+            # まず該当するレコードの id を取得
+            result = self.collection.get(
+                where={"document_id": document_id},
+                include=[]
+            )
+            ids = result.get("ids") or []
+            if not ids:
+                # 一致するデータなし
+                return 0
+
+            # 取得した id 群を削除
+            self.collection.delete(ids=ids)
+
+            return len(ids)
+        except Exception as e:
+            print(f"delete_document 中にエラーが発生しました: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return 0
+
 
     def add_document(self, doc_id: str, title: str, content: str) -> int:
         """

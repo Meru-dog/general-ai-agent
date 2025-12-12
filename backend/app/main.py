@@ -1,28 +1,36 @@
 import io
-from pypdf import PdfReader
-from docx import Document
+import uuid
 from typing import List
+
+from docx import Document
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from pypdf import PdfReader
 
 from app.agent.graph_builder import agent_executor
 from app.agent.types import StepLog
-from app.rag.index_builder import build_index
+from app.rag.index_builder import build_index  # 必要に応じて使用
 from app.rag.retriever import RAGRetriever
-from app import config
-import uuid
+from app import config  # どこかで使っていればそのまま
+
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # 必要に応じて絞り込んでOK
+    allow_origins=["*"],   # 本番では必要に応じて絞る
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# =========================
+# RAG Retriever（文書管理用の共有インスタンス）
+# =========================
+
+document_retriever = RAGRetriever()
 
 
 # =========================
@@ -31,12 +39,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_event():
-    # 既存の build_index 呼び出しがあるならそれはそのまま or 好きなように
     try:
-        # ここは今の実装に合わせて必要ならコメントアウトでもOK
+        # 必要なら起動時にインデックス構築を行ってもよい
         # build_index()
-        retriever = RAGRetriever()
-        count = retriever.collection.count()
+        count = document_retriever.collection.count()
         print(f"アプリケーション起動: インデックス確認完了（{count}件のチャンクが登録されています）")
     except Exception as e:
         print(f"警告: 起動時のインデックス確認に失敗しました: {e}")
@@ -49,22 +55,41 @@ def startup_event():
 class AskRequest(BaseModel):
     input: str
 
+
 class AskResponse(BaseModel):
     output: str
     steps: List[StepLog]
+
 
 class DocumentRegisterRequest(BaseModel):
     title: str
     content: str
 
+
+# --- 文書一覧・削除用のレスポンスモデル ---
+class DocumentSummary(BaseModel):
+    document_id: str
+    document_title: str
+    chunk_count: int
+
+
+class DocumentListResponse(BaseModel):
+    documents: List[DocumentSummary]
+
+
 # =========================
-# エージェント呼び出しAPI
+# ヘルスチェック
 # =========================
 
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "general-ai-agent backend is running"}
-    
+
+
+# =========================
+# 文書アップロード（ファイル）
+# =========================
+
 @app.post("/api/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
@@ -148,10 +173,9 @@ async def upload_document(
             )
 
         # ここまでで content にテキストが入っている前提
-        retriever = RAGRetriever()
         doc_id = "user_" + uuid.uuid4().hex
 
-        result = retriever.add_document(
+        result = document_retriever.add_document(
             doc_id=doc_id,
             title=final_title,
             content=content,
@@ -178,6 +202,10 @@ async def upload_document(
         )
 
 
+# =========================
+# 文書登録（コピペテキスト）
+# =========================
+
 @app.post("/api/documents/register")
 async def register_document(payload: DocumentRegisterRequest):
     """
@@ -186,14 +214,10 @@ async def register_document(payload: DocumentRegisterRequest):
     try:
         print(f"[API] /api/documents/register called. title={payload.title!r}")
 
-        retriever = RAGRetriever()
-
         # ユーザー文書用の一意な doc_id を生成
         doc_id = "user_" + uuid.uuid4().hex
 
-        # RAGRetriever.add_document のシグネチャ:
-        # def add_document(self, doc_id, title, content, ...)
-        result = retriever.add_document(
+        result = document_retriever.add_document(
             doc_id=doc_id,
             title=payload.title,
             content=payload.content,
@@ -217,6 +241,60 @@ async def register_document(payload: DocumentRegisterRequest):
         )
 
 
+# =========================
+# 文書一覧取得
+# =========================
+
+@app.get("/api/documents", response_model=DocumentListResponse)
+async def list_documents():
+    """
+    登録済み文書の一覧を返すAPI
+    （document_id ごとにタイトルとチャンク数をまとめたもの）
+    """
+    try:
+        docs = document_retriever.list_documents()
+        return DocumentListResponse(documents=docs)
+    except Exception as e:
+        import traceback
+        print(f"Error in GET /api/documents: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"文書一覧の取得中にエラーが発生しました: {e}",
+        )
+
+# =========================
+# 文書削除
+# =========================
+
+@app.delete("/api/documents/{document_id}")
+async def delete_document(document_id: str):
+    """
+    指定した document_id に対応するチャンクをすべて削除する。
+    """
+    try:
+        deleted = document_retriever.delete_document(document_id)
+        if deleted == 0:
+            # 見つからなかった場合は 404 扱い
+            raise HTTPException(
+                status_code=404,
+                detail=f"document_id='{document_id}' に対応するデータは見つかりませんでした。",
+            )
+        return {"document_id": document_id, "deleted_chunks": deleted}
+    except HTTPException:
+        # そのまま再スロー
+        raise
+    except Exception as e:
+        print(f"Error in DELETE /api/documents/{document_id}: {e}")
+        return JSONResponse(
+            content={"error": str(e), "message": "文書の削除中にエラーが発生しました。"},
+            status_code=500,
+        )
+
+
+# =========================
+# エージェント呼び出しAPI
+# =========================
 
 @app.post("/api/agent/ask", response_model=AskResponse)
 async def ask_agent(request: AskRequest):
@@ -224,7 +302,6 @@ async def ask_agent(request: AskRequest):
     フロントエンドからの質問を受け取り、LangGraph エージェントを実行して回答を返すエンドポイント
     """
     try:
-        # ここが必ず出るはずのログ
         print(f"[API] /api/agent/ask called. input={request.input[:50]!r}")
 
         # LangGraph に渡す初期 state

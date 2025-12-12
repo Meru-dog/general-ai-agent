@@ -115,7 +115,8 @@
   font-size: 0.9rem;
   font-family: inherit;
   resize: vertical;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .question-input:focus,
@@ -134,7 +135,8 @@
   border: 1px solid #d1d5db;
   font-size: 0.9rem;
   font-family: inherit;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .text-input:focus {
@@ -189,7 +191,8 @@
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.08s ease, box-shadow 0.08s ease, background-color 0.15s ease;
+  transition: transform 0.08s ease, box-shadow 0.08s ease,
+    background-color 0.15s ease;
 }
 
 .submit-button {
@@ -324,4 +327,50 @@
   margin-top: 4px;
   font-size: 0.8rem;
   color: #4b5563;
+}
+
+/* ===== ここから文書一覧テーブル用のスタイルを追加 ===== */
+
+.documents-section {
+  margin-top: 20px;
+}
+
+.documents-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.documents-table th,
+.documents-table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.documents-table th {
+  background-color: #f9fafb;
+  font-weight: 600;
+}
+
+.documents-table tr:last-child td {
+  border-bottom: none;
+}
+
+.mono-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+/* 削除ボタンを少し目立たせる */
+.danger-button {
+  background-color: #f97373;
+  color: #111827;
+}
+
+.danger-button:hover {
+  background-color: #f87171;
 }
