@@ -16,6 +16,31 @@ const DOC_LIST_URL = `${API_BASE_URL}/api/documents`;
 const DOC_DELETE_URL = (documentId) =>
   `${API_BASE_URL}/api/documents/${documentId}`;
 
+// 回答プロファイル（モード）定義
+const ANSWER_PROFILES = {
+  default: {
+    label: "標準",
+    systemPrompt: "",
+  },
+  legal: {
+    label: "法務検討モード",
+    systemPrompt: `
+あなたは日本法を扱う法律実務家向けのAIアシスタントです。
+- 条文番号や条文構造に言及できるときは、可能な範囲で触れてください。
+- 断定を避け、前提・限界やリスクにも言及してください。
+- 「一般論」と「手元文書に基づく話」をできるだけ区別して説明してください。
+`.trim(),
+  },
+  summary: {
+    label: "要約モード",
+    systemPrompt: `
+あなたは文章要約に特化したアシスタントです。
+- 出力はできるだけ簡潔に、要点を箇条書きでまとめてください。
+- 不明な点や前提条件が必要な点は、その旨を短く指摘してください。
+`.trim(),
+  },
+};
+
 console.log("API URL:", API_URL);
 console.log("Environment variable VITE_API_URL:", import.meta.env.VITE_API_URL);
 console.log("ASK_URL:", ASK_URL);
@@ -32,9 +57,11 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // 会話履歴（今回追加）
-  // 形式: { role: "user" | "assistant", content: string } の配列
+  // 会話履歴
   const [messages, setMessages] = useState([]);
+
+  // ★ 追加：現在の回答モード
+  const [answerProfile, setAnswerProfile] = useState("default");
 
   // ====== 文書登録（コピペ） ======
   const [docTitle, setDocTitle] = useState("");
@@ -85,10 +112,6 @@ function App() {
         `文書を登録しました（title: ${data.title}, doc_id: ${data.doc_id}）。`
       );
 
-      // フォームは残しておきたければコメントアウト
-      // setDocTitle("");
-      // setDocContent("");
-
       // 一覧を再取得
       await fetchDocuments();
     } catch (err) {
@@ -113,12 +136,7 @@ function App() {
     setUploadFile(file);
     setUploadMessage("");
     if (file) {
-      console.log(
-        "選択されたファイル:",
-        file.name,
-        file.type,
-        file.size
-      );
+      console.log("選択されたファイル:", file.name, file.type, file.size);
     }
   };
 
@@ -136,7 +154,7 @@ function App() {
 
       const formData = new FormData();
       formData.append("file", uploadFile);
-      // 必要であればタイトルを別途送る（指定しなければファイル名がtitleになる実装）
+      // 必要であればタイトルを別途送る
       // formData.append("title", uploadFile.name);
 
       const res = await fetch(DOC_UPLOAD_URL, {
@@ -217,7 +235,8 @@ function App() {
         const data = await res.json().catch(() => ({}));
         console.error("文書削除エラー:", data);
         throw new Error(
-          data.detail || "文書削除に失敗しました。document_id が存在しない可能性があります。"
+          data.detail ||
+            "文書削除に失敗しました。document_id が存在しない可能性があります。"
         );
       }
 
@@ -230,10 +249,29 @@ function App() {
       );
     } catch (err) {
       console.error("文書削除中にエラー:", err);
-      alert(
-        `文書削除中にエラーが発生しました: ${err.message}`
-      );
+      alert(`文書削除中にエラーが発生しました: ${err.message}`);
     }
+  };
+
+  // -----------------------------
+  // 回答モードに応じたプロンプト組み立て
+  // -----------------------------
+  const buildPrompt = (rawInput) => {
+    const profile = ANSWER_PROFILES[answerProfile] || ANSWER_PROFILES.default;
+
+    if (!profile.systemPrompt) {
+      // デフォルトはそのまま送る
+      return rawInput;
+    }
+
+    return `
+[回答プロファイル]: ${profile.label}
+
+${profile.systemPrompt}
+
+--- ユーザーからの指示 ---
+${rawInput}
+`.trim();
   };
 
   // -----------------------------
@@ -256,13 +294,16 @@ function App() {
     const userMessage = { role: "user", content: trimmedInput };
     const historyToSend = [...messages, userMessage];
 
+    // ★ モードに応じて送信用プロンプトを組み立てる
+    const promptToSend = buildPrompt(trimmedInput);
+
     try {
       const res = await fetch(ASK_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          input: trimmedInput,
-          history: historyToSend, // ★ここが今回のポイント
+          input: promptToSend,
+          history: historyToSend,
         }),
       });
 
@@ -287,7 +328,7 @@ function App() {
       const assistantMessage = { role: "assistant", content: answerText };
       setMessages([...historyToSend, assistantMessage]);
 
-      // 入力欄はそのまま残しても、空にしてもどちらでもよい
+      // 入力欄はそのままでもOK
       // setInputText("");
     } catch (err) {
       console.error("API呼び出し中にエラー:", err);
@@ -299,7 +340,7 @@ function App() {
     }
   };
 
-  // 会話履歴をクリアしたいときのボタン用
+  // 会話履歴クリア
   const handleClearConversation = () => {
     if (
       !window.confirm(
@@ -497,6 +538,24 @@ function App() {
         <div className="subsection">
           <h3 className="subsection-title">エージェント実行</h3>
           <form className="question-form" onSubmit={handleAsk}>
+            {/* ★ 追加：回答モード選択 */}
+            <div className="profile-row">
+              <label className="profile-label">
+                回答モード：
+                <select
+                  value={answerProfile}
+                  onChange={(e) => setAnswerProfile(e.target.value)}
+                  className="profile-select"
+                >
+                  {Object.entries(ANSWER_PROFILES).map(([key, profile]) => (
+                    <option key={key} value={key}>
+                      {profile.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
             <label className="field-label">
               指示（質問）を入力してください：
               <textarea
