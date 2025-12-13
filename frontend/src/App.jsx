@@ -1,5 +1,5 @@
 import ReactMarkdown from "react-markdown";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
 
 // メインのエージェントAPIのURL
@@ -15,6 +15,8 @@ const DOC_UPLOAD_URL = `${API_BASE_URL}/api/documents/upload`;
 const DOC_LIST_URL = `${API_BASE_URL}/api/documents`;
 const DOC_DELETE_URL = (documentId) =>
   `${API_BASE_URL}/api/documents/${documentId}`;
+// 会話履歴保存用のキー
+const CHAT_HISTORY_STORAGE_KEY = "general-ai-agent:messages";
 
 // 回答プロファイル（モード）定義
 const ANSWER_PROFILES = {
@@ -58,7 +60,30 @@ function App() {
   const [error, setError] = useState("");
 
   // 会話履歴
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(() => {
+    try {
+      const stored = localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+      console.log("Loaded messages from localStorage (init):", stored);
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.warn("Failed to init messages from localStorage:", e);
+      return [];
+    }
+  });
+
+  // messages が変わるたびに localStorage に保存
+  useEffect(() => {
+    try {
+      const serialized = JSON.stringify(messages);
+      console.log("Saving messages to localStorage:", serialized);
+      localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, serialized);
+    } catch (e) {
+      console.warn("Failed to save messages to localStorage:", e);
+    }
+  }, [messages]);
+
 
   // ★ 追加：現在の回答モード
   const [answerProfile, setAnswerProfile] = useState("default");
@@ -340,20 +365,30 @@ ${rawInput}
     }
   };
 
-  // 会話履歴クリア
-  const handleClearConversation = () => {
-    if (
-      !window.confirm(
-        "これまでの会話履歴（user/assistant）をすべてクリアしますか？"
-      )
-    ) {
-      return;
-    }
-    setMessages([]);
-    setOutput("");
-    setSteps([]);
-    setError("");
-  };
+// 会話履歴クリア
+const handleClearConversation = () => {
+  if (
+    !window.confirm(
+      "これまでの会話履歴（user/assistant）をすべてクリアしますか？"
+    )
+  ) {
+    return;
+  }
+
+  // 画面上の状態をリセット
+  setMessages([]);
+  setOutput("");
+  setSteps([]);
+  setError("");
+
+  // localStorage もクリア
+  try {
+    localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
+  } catch (e) {
+    console.warn("Failed to clear chat history from localStorage:", e);
+  }
+};
+
 
   return (
     <div className="app">
