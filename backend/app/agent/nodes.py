@@ -1,6 +1,6 @@
 # backend/app/agent/nodes.py
 
-from app.agent.types import AgentState, StepLog
+from app.agent.types import AgentState, StepLog, Reference
 from app.rag.retriever import RAGRetriever
 from app.tools.web_search import run_web_search
 from app import config
@@ -71,9 +71,10 @@ def analyze_intent(state: AgentState) -> AgentState:
 
     state.steps.append(
         StepLog(
-            step_id=len(state.steps) + 1,
-            action="analysis",
-            content=f"質問意図解析: {'文書依存' if intent == 'doc_dependent' else '非文書依存'}（{reason}）",
+            step_idx=len(state.steps) + 1,
+            agent_node="analysis",
+            step_input=f"Input: {text}",
+            step_output=f"Intent: {'文書依存' if intent == 'doc_dependent' else '非文書依存'} ({reason})",
         )
     )
 
@@ -88,9 +89,10 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
         msg = "RAGスキップ: 非文書依存と判断されたため、手元文書は参照しませんでした。"
         state.steps.append(
             StepLog(
-                step_id=len(state.steps) + 1,
-                action="rag",
-                content=msg,
+                step_idx=len(state.steps) + 1,
+                agent_node="rag",
+                step_input="Skipped",
+                step_output=msg,
             )
         )
         state.rag_result = []
@@ -113,9 +115,10 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
         state.source = "llm"
         state.steps.append(
             StepLog(
-                step_id=len(state.steps) + 1,
-                action="rag",
-                content=msg,
+                step_idx=len(state.steps) + 1,
+                agent_node="rag",
+                step_input=f"Query: {query}",
+                step_output=msg,
             )
         )
         return state
@@ -147,6 +150,15 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
                 sample_titles = "、".join(titles[:3])
                 msg = f"RAG実行: {len(results)}件ヒット（例: {sample_titles}）"
                 state.rag_result = results
+                # 参照リストを作成
+                for r in results:
+                    state.references.append(
+                        Reference(
+                            title=r.get("document_title", "不明"),
+                            snippet=r.get("snippet", ""),
+                            url=None # 文書アップロードの場合はURLなし
+                        )
+                    )
                 state.source = "rag"
             else:
                 msg = (
@@ -170,9 +182,10 @@ def run_rag_if_needed(state: AgentState) -> AgentState:
 
     state.steps.append(
         StepLog(
-            step_id=len(state.steps) + 1,
-            action="rag",
-            content=msg,
+            step_idx=len(state.steps) + 1,
+            agent_node="rag",
+            step_input=f"Query: {query}",
+            step_output=msg,
         )
     )
 
@@ -211,9 +224,10 @@ def run_web_search_if_needed(state: AgentState) -> AgentState:
     if not need_web:
         state.steps.append(
             StepLog(
-                step_id=len(state.steps) + 1,
-                action="web-search",
-                content="Web検索は不要と判断（キーワードなし）。",
+                step_idx=len(state.steps) + 1,
+                agent_node="web-search",
+                step_input=f"Keywords check: {question}",
+                step_output="Web検索不要",
             )
         )
         return state
@@ -225,16 +239,26 @@ def run_web_search_if_needed(state: AgentState) -> AgentState:
     # ログ
     state.steps.append(
         StepLog(
-            step_id=len(state.steps) + 1,
-            action="web-search",
-            content=f"Web検索を実行: {len(results)}件ヒット。",
+            step_idx=len(state.steps) + 1,
+            agent_node="web-search",
+            step_input=f"Search Query: {question}",
+            step_output=f"Web検索実行: {len(results)}件ヒット",
         )
     )
+
+    # 参照リストに追加
+    for r in results:
+        state.references.append(
+            Reference(
+                title=r.get("title", "No Title"),
+                url=r.get("url"),
+                snippet=r.get("content") or r.get("snippet")
+            )
+        )
 
     return state
 
 
-# ===== ノード4: 回答生成 =====
 # ===== ノード4: 回答生成 =====
 
 def _format_rag_context(rag_result) -> str:
@@ -361,9 +385,10 @@ def generate_answer(state: AgentState) -> AgentState:
 
     state.steps.append(
         StepLog(
-            step_id=len(state.steps) + 1,
-            action="answer",
-            content="RAG結果・Web検索結果と質問内容を踏まえて回答を生成しました。"
+            step_idx=len(state.steps) + 1,
+            agent_node="answer",
+            step_input="Context + Question",
+            step_output="回答生成完了",
         )
     )
 

@@ -6,13 +6,23 @@ from pydantic import BaseModel, Field
 class StepLog(BaseModel):
     """
     実行ログを1ステップ分記録するクラス
-    - step_id: 実行順序番号
-    - action: 実施した処理の種類（analysis / decision / rag / answer など）
-    - content: 処理内容の説明（人が理解できる形）
+    - step_idx: 実行順序番号
+    - agent_node: 実施した処理の種類（analysis / rag / answer 等）
+    - step_input: ステップへの入力概略
+    - step_output: ステップの出力概略（人が理解できる形）
+    - tool_calls: ツール呼び出しの詳細（オプション）
     """
-    step_id: int
-    action: str
-    content: str
+    step_idx: int
+    agent_node: str
+    step_input: str
+    step_output: str
+    tool_calls: Optional[List[Dict]] = None
+
+class Reference(BaseModel):
+    title: str
+    url: Optional[str] = None
+    snippet: Optional[str] = None
+
 
 
 class AgentState(BaseModel):
@@ -35,5 +45,5 @@ class AgentState(BaseModel):
     steps: List[StepLog] = Field(default_factory=list)
     chat_history: List[Dict[str, str]] = Field(default_factory=list)
 
-    # どの情報源を主に使ったかを示す（ログ・UI用）
+    references: List[Reference] = Field(default_factory=list)
     source: Optional[str] = None
